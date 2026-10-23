@@ -5,6 +5,8 @@
 
 > 从一把燧石镐开始，开拓一整个世界。
 
+📖 **第一次玩？先看 [游戏手册](docs/游戏手册.md)**：新手第一天的玩法、每个系统的说明、Boss 打法、完整成长路线，以及全部配方、道具、敌人的速查表。
+
 ## 下载
 
 ```bash
@@ -213,6 +215,8 @@ tests/smoke_test.gd      自动化冒烟测试
 tools/export_art.gd      把生成的像素图导出成 PNG（assets/generated/）
 tools/make_launcher.sh   生成双击启动用的「拓荒者之歌.app」
 tools/export_icon.gd     把 icon.svg 渲染成启动器图标
+tools/gen_manual.gd      根据游戏数据重新生成手册里的速查表（改了道具或敌人后运行一次）
+docs/游戏手册.md         游戏手册
 tools/screenshot.gd      开发用截图工具
 ```
 
