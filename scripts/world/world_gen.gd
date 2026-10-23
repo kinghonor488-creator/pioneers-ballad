@@ -197,6 +197,7 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 
 	w.tiles = T
 	w.walls = WL
+	w.rebuild_sky()
 	return w
 
 

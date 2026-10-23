@@ -8,10 +8,9 @@ const DAY_LENGTH := 720.0       ## 一整天多少秒（12 分钟）
 const BASE_REACH := 5.0         ## 基础触及距离（图块）
 const STATION_RADIUS := 5       ## 离制作站多少格以内算"在附近"
 const MAX_LIFE_FRUITS := 5
-const DAY_AMBIENT := Color(1, 1, 1)
-const NIGHT_AMBIENT := Color(0.32, 0.34, 0.5)
-const DAWN_AMBIENT := Color(0.95, 0.75, 0.65)
-const CAVE_AMBIENT := Color(0.13, 0.12, 0.16)
+const DAY_SUN := Color(1, 1, 1)
+const NIGHT_SUN := Color(0.2, 0.23, 0.38)      ## 月光：偏蓝
+const DAWN_SUN := Color(1.0, 0.72, 0.55)       ## 日出日落：偏橙
 const RARITY_GOLD := Color(1.0, 0.8, 0.35)
 const AUTOSAVE_INTERVAL := 300.0  ## 每 5 分钟自动保存一次
 const TITLE_SCENE := "res://scenes/title.tscn"
@@ -28,9 +27,8 @@ var inventory: Inventory
 var hud: Hud
 var sky: SkyBackdrop
 var cursor: TileCursor
-var canvas_mod: CanvasModulate
-var player_light: PointLight2D
 var combat: Combat
+var lighting: Lighting
 var rng := RandomNumberGenerator.new()
 var ready_done := false
 var world_name := "未命名世界"
@@ -109,9 +107,10 @@ func _ready() -> void:
 		world = WorldGen.generate(world_width, world_height, world_seed)
 		print("[世界] 生成完成 %d×%d 种子=%d 用时 %d 毫秒" % [world_width, world_height, world_seed, Time.get_ticks_msec() - t0])
 
+	lighting = Lighting.new()
 	renderer = WorldRenderer.new()
 	add_child(renderer)
-	renderer.setup(world)
+	renderer.setup(world, lighting.material)
 
 	cursor = TileCursor.new()
 	cursor.z_index = 10
@@ -120,6 +119,7 @@ func _ready() -> void:
 	player = Player.new()
 	player.world = world
 	player.z_index = 5
+	player.material = lighting.material
 	add_child(player)
 	player.teleport(spawn_position())
 	player.landed_hard.connect(func(dmg): damage(dmg, "摔伤"))
@@ -139,12 +139,7 @@ func _ready() -> void:
 	add_child(combat)
 	combat.setup(self)
 
-	player_light = WorldRenderer.make_light(3.0, Color(1.0, 0.95, 0.85), 0.6)
-	player_light.position = Vector2(Player.W, Player.H) * 0.5
-	player.add_child(player_light)
-
-	canvas_mod = CanvasModulate.new()
-	add_child(canvas_mod)
+	add_child(lighting)
 
 	inventory = Inventory.new()
 	if loading:
@@ -155,6 +150,8 @@ func _ready() -> void:
 		player.hp = player.max_hp
 
 	renderer.update_view(player.center(), _view_size(), true)
+	_update_ambient()
+	lighting.setup(self)
 	hud.loading_text = ""
 	hud.setup(self)
 	if loading:
@@ -257,19 +254,15 @@ func underground_factor() -> float:
 	return clampf((ty - (s + 12)) / 35.0, 0.0, 1.0)
 
 
+## 昼夜：设置天光颜色（逐格光照用）和玩家身上的光
 func _update_ambient() -> void:
 	var dl := SkyBackdrop.daylight(time_of_day)
-	var amb := NIGHT_AMBIENT.lerp(DAY_AMBIENT, dl)
+	var sun := NIGHT_SUN.lerp(DAY_SUN, dl)
 	if dl > 0.0 and dl < 1.0:
-		amb = amb.lerp(DAWN_AMBIENT, sin(dl * PI) * 0.6)
+		sun = sun.lerp(DAWN_SUN, sin(dl * PI) * 0.6)
+	lighting.sun = sun
+	player.light_strength = clampf(0.4 + float(stats.get("light", 0.0)) * 0.1, 0.4, 1.3)
 	var depth := underground_factor()
-	amb = amb.lerp(CAVE_AMBIENT, depth)
-	canvas_mod.color = amb
-	var darkness := 1.0 - amb.get_luminance()
-	renderer.set_light_strength(clampf(darkness * 1.4, 0.15, 1.0))
-	var light_bonus := float(stats.get("light", 0.0))
-	player_light.texture_scale = (3.0 + light_bonus) * TS / 64.0
-	player_light.energy = clampf(darkness * 1.2, 0.0, 1.0) * (0.55 if light_bonus <= 0.0 else 1.0)
 	var cam := camera.get_screen_center_position()
 	sky.time_of_day = time_of_day
 	sky.depth = depth
@@ -603,6 +596,7 @@ func throw_item(slot: int, target_px: Vector2) -> void:
 	b.position = player.center() + Vector2(0, -6)
 	b.velocity = (target_px - b.position).normalized() * 330.0 + Vector2(0, -60)
 	b.z_index = 6
+	b.material = lighting.material
 	b.exploded.connect(explode)
 	add_child(b)
 	inventory.consume_slot(slot, 1)

@@ -119,7 +119,7 @@ func use_weapon(item: Dictionary, target_px: Vector2) -> bool:
 			pr.weapon = item
 			pr.pierce = int(w.get("pierce", 1))
 			pr.life = 1.6
-			pr.setup_light(2.5)
+			pr.setup_light(0.7)
 	_cooldown = 1.0 / speed
 	p.facing = 1 if aim.x >= 0.0 else -1
 	p.attack_anim = minf(1.0 / speed, 0.35)
@@ -211,7 +211,7 @@ func spawn_hostile_shot(pos: Vector2, vel: Vector2, dmg: int, kind: String = "fi
 	pr.phase = phase
 	pr.life = 4.0 if kind != "wave" else 2.2
 	if kind != "wave":
-		pr.setup_light(2.0 if kind == "fireball" else 1.5)
+		pr.setup_light(0.6 if kind == "fireball" else 0.4)
 
 
 # ---------------------------------------------------------------- Boss

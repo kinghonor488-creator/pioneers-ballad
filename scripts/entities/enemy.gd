@@ -41,9 +41,14 @@ func setup(enemy_id: String, w: WorldData, player: Player, combat_ref: Node) -> 
 	_wander = 1.0 if randf() < 0.5 else -1.0
 	_t = randf() * 10.0
 	if def.has("glow"):
-		var l := WorldRenderer.make_light(float(def.glow), def.color, 0.8)
-		l.position = body_size * 0.5
-		add_child(l)
+		add_to_group("light")
+	if combat.game.lighting != null:
+		material = combat.game.lighting.material
+
+
+## 发光的敌人（游魂、灵晶傀儡、余烬魔、Boss）本身就是光源
+func light_source() -> Array:
+	return [center(), def.color, Lighting.strength_for_radius(float(def.get("glow", 0.0)))]
 
 
 func flying() -> bool:

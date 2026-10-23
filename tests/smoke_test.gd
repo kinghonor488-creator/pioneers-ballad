@@ -250,6 +250,7 @@ func _test_game() -> void:
 	main.explode(bc, 2.0)
 	check(main.world.get_tile(bt.x, bt.y) == TileDB.AIR, "炸弹能炸掉方块")
 
+	_test_lighting(main)
 	await _test_combat(main)
 	await _test_bosses(main)
 
@@ -259,6 +260,78 @@ func _test_game() -> void:
 	check(main.ready_done, "游戏主循环运行正常")
 
 	await _test_save_load(main)
+
+
+const GAME_VIEW := Vector2(640, 360)   ## 1280×720 窗口、2 倍缩放时看到的世界范围
+
+
+func _test_lighting(main: Node2D) -> void:
+	print("== 光照 ==")
+	var L: Lighting = main.lighting
+	var w: WorldData = main.world
+	var p: Player = main.player
+	var pt := Vector2i(p.center() / 16.0)
+	main.time_of_day = 0.5
+	main._update_ambient()
+	L.compute_now(p.center(), GAME_VIEW)
+	print("  光照计算用时 %.1f 毫秒（%d×%d 格）" % [L.last_ms, L.last_image.get_width(), L.last_image.get_height()])
+	check(L.last_ms < 200.0, "光照计算足够快")
+	var sky_cell := Vector2i(pt.x, w.sky_y[pt.x] - 6)
+	check(L.light_at(sky_cell) > 0.9, "白天露天的地方是亮的（%.2f）" % L.light_at(sky_cell))
+	var deep := Vector2i(pt.x, w.sky_y[pt.x] + 9)
+	var all_solid := true
+	for dy in range(-3, 4):
+		for dx in range(-3, 4):
+			all_solid = all_solid and w.is_solid(deep.x + dx, deep.y + dy)
+	if all_solid:
+		check(L.light_at(deep) < 0.05, "厚土层里面是黑的（%.2f）" % L.light_at(deep))
+	# 在地下挖一个小洞放火把
+	var c := Vector2i(pt.x + 7, w.sky_y[pt.x + 7] + 11)
+	var saved := {}
+	for dy in range(-12, 13):
+		for dx in range(-12, 13):
+			var q := c + Vector2i(dx, dy)
+			saved[q] = w.get_tile(q.x, q.y)
+			var inside := absi(dx) <= 1 and absi(dy) <= 1
+			w.set_tile(q.x, q.y, TileDB.AIR if inside else TileDB.STONE)
+	w.set_tile(c.x, c.y + 1, TileDB.STONE)
+	w.set_tile(c.x, c.y, TileDB.TORCH)
+	L.compute_now(p.center(), GAME_VIEW)
+	var at := L.light_at(c)
+	var wall := L.light_at(c + Vector2i(3, 0))
+	var far := L.light_at(c + Vector2i(9, 0))
+	check(at > 0.8, "火把所在的格子很亮（%.2f）" % at)
+	check(wall > 0.05 and wall < at, "火把照亮洞壁表面（%.2f）" % wall)
+	check(far >= 0.0 and far < 0.05, "光照不透厚岩层（%.2f）" % far)
+	var torch_px := L.last_image.get_pixelv(c - L.last_origin)
+	check(torch_px.r > torch_px.b, "火把的光是暖色的")
+	w.set_tile(c.x, c.y, TileDB.CRYSTAL)
+	L.compute_now(p.center(), GAME_VIEW)
+	var crystal_px := L.last_image.get_pixelv(c - L.last_origin)
+	check(crystal_px.g > crystal_px.r, "灵晶簇的光是青色的")
+	for q in saved:
+		w.set_tile(q.x, q.y, saved[q])
+	# 夜晚
+	main.time_of_day = 0.0
+	main._update_ambient()
+	L.compute_now(p.center(), GAME_VIEW)
+	var night_px := L.last_image.get_pixelv(sky_cell - L.last_origin)
+	check(night_px.r < 0.45 and night_px.b > night_px.r, "夜晚露天变暗、偏蓝（%.2f, %.2f, %.2f）" % [night_px.r, night_px.g, night_px.b])
+	# 天光高度随挖掘和建造更新
+	var col := pt.x + 3
+	var top := w.sky_y[col]
+	var old_top := w.get_tile(col, top)
+	w.set_tile(col, top, TileDB.AIR)
+	check(w.sky_y[col] > top, "挖掉最上面的方块后，天光能照得更深")
+	var old_above := w.get_tile(col, top - 6)
+	w.set_tile(col, top - 6, TileDB.STONE)
+	check(w.sky_y[col] == top - 6, "在空中放方块会挡住天光")
+	w.set_tile(col, top - 6, old_above)
+	w.set_tile(col, top, old_top)
+	check(w.sky_y[col] == top, "恢复后天光高度也恢复")
+	# 玩家身上的光
+	main.time_of_day = 0.5
+	main._update_ambient()
 
 
 func _test_combat(main: Node2D) -> void:

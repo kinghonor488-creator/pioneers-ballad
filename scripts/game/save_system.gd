@@ -97,6 +97,7 @@ static func load_full(path: String) -> Dictionary:
 	w.surface = h.get("surface", PackedInt32Array())
 	if w.surface.size() != w.width:
 		return {}
+	w.rebuild_sky()
 	return {"header": h, "world": w}
 
 

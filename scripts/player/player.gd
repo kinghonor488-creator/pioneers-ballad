@@ -27,6 +27,7 @@ var invuln := 0.0          ## 受击后的无敌时间
 var mana := 40.0
 var max_mana := 40
 var attack_anim := 0.0     ## >0 时正在挥动武器（攻击时面朝鼠标）
+var light_strength := 0.4  ## 玩家身上的光（饰品、萤光药水会加强）
 
 var _coyote := 0.0
 var _jump_buffer := 0.0
@@ -36,6 +37,12 @@ var _walk_t := 0.0
 
 func _init() -> void:
 	body_size = Vector2(W, H)
+	add_to_group("light")
+
+
+## 给 Lighting 用：[位置, 颜色, 亮度]
+func light_source() -> Array:
+	return [center(), Color(1.0, 0.95, 0.85), light_strength]
 
 
 ## dir: -1..1 左右输入

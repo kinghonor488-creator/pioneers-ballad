@@ -11,6 +11,7 @@ var seed_value := 0
 var tiles := PackedByteArray()
 var walls := PackedByteArray()
 var surface := PackedInt32Array()  ## 每一列生成时的地表高度
+var sky_y := PackedInt32Array()    ## 每一列从上往下第一个实心方块的 y（它上面都能被天光直射）
 var spawn := Vector2i.ZERO          ## 出生点（脚下方块的上方一格）
 var layers := {}                    ## "surface"/"rock"/"cavern"/"underworld" -> 该层开始的 y
 
@@ -46,7 +47,29 @@ func set_tile(x: int, y: int, id: int) -> void:
 	if not in_bounds(x, y):
 		return
 	tiles[y * width + x] = id
+	if sky_y.size() == width:
+		if TileDB.is_solid(id):
+			if y < sky_y[x]:
+				sky_y[x] = y
+		elif y == sky_y[x]:
+			sky_y[x] = _scan_sky(x, y)
 	tile_changed.emit(x, y)
+
+
+## 重新计算每一列的天光高度（生成世界、读档之后调用一次）
+func rebuild_sky() -> void:
+	sky_y.resize(width)
+	for x in width:
+		sky_y[x] = _scan_sky(x, 0)
+
+
+func _scan_sky(x: int, from_y: int) -> int:
+	var i := from_y * width + x
+	for y in range(from_y, height):
+		if TileDB.is_solid(tiles[i]):
+			return y
+		i += width
+	return height
 
 
 func is_solid(x: int, y: int) -> bool:

@@ -20,9 +20,17 @@ var dead := false
 var _hit := {}
 
 
-func setup_light(radius: float) -> void:
-	var l := WorldRenderer.make_light(radius, color, 0.9)
-	add_child(l)
+var _light := 0.0
+
+
+## 让这颗弹幕发光（法术弹、火球、晶刺）
+func setup_light(strength: float) -> void:
+	_light = strength
+	add_to_group("light")
+
+
+func light_source() -> Array:
+	return [position, color, _light]
 
 
 func tick(delta: float) -> void:

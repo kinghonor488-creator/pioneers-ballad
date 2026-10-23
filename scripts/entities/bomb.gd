@@ -11,6 +11,15 @@ var radius := 3.0
 var big := false
 
 
+func _ready() -> void:
+	add_to_group("light")
+
+
+## 引信的小火花
+func light_source() -> Array:
+	return [position, Color(1.0, 0.6, 0.25), 0.35]
+
+
 func _physics_process(delta: float) -> void:
 	fuse -= delta
 	if fuse <= 0.0:
