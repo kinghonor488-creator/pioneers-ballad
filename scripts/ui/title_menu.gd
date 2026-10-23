@@ -17,10 +17,13 @@ var size_option: OptionButton
 var status_label: Label
 var confirm: ConfirmationDialog
 var sky: SkyBackdrop
+var panel: PanelContainer
+var scroll: ScrollContainer
 var _pending_delete := ""
 
 
 func _ready() -> void:
+	GameSession.setup_screen(get_tree())
 	get_tree().set_auto_accept_quit(true)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	theme = _make_theme()
@@ -35,7 +38,7 @@ func _ready() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
-	var panel := PanelContainer.new()
+	panel = PanelContainer.new()
 	panel.custom_minimum_size = Vector2(620, 0)
 	center.add_child(panel)
 	var v := VBoxContainer.new()
@@ -47,7 +50,7 @@ func _ready() -> void:
 	v.add_child(HSeparator.new())
 
 	v.add_child(_label("选择世界", 20, GOLD))
-	var scroll := ScrollContainer.new()
+	scroll = ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 230)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	v.add_child(scroll)
@@ -116,6 +119,15 @@ func _ready() -> void:
 	add_child(confirm)
 
 	refresh_list()
+	get_viewport().size_changed.connect(_fit_to_screen)
+	_fit_to_screen()
+
+
+## 小屏幕：面板变窄、世界列表变矮，保证整个界面放得下
+func _fit_to_screen() -> void:
+	var vs := get_viewport_rect().size
+	panel.custom_minimum_size.x = minf(620.0, vs.x - 32.0)
+	scroll.custom_minimum_size.y = clampf(vs.y - 500.0, 90.0, 230.0)
 
 
 func _input(event: InputEvent) -> void:

@@ -69,6 +69,7 @@ var _mana_delay := 0.0
 
 
 func _ready() -> void:
+	GameSession.setup_screen(get_tree())
 	_setup_input()
 	# 标题界面选好的世界（自动测试时 GameSession 为空，就用上面的 @export 参数）
 	save_path = GameSession.save_path

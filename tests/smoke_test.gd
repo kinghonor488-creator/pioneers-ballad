@@ -258,6 +258,7 @@ func _test_game() -> void:
 	main.explode(bc, 2.0)
 	check(main.world.get_tile(bt.x, bt.y) == TileDB.AIR, "炸弹能炸掉方块")
 
+	_test_screen(main)
 	_test_lighting(main)
 	_test_liquids(main)
 	await _test_biomes(main)
@@ -270,6 +271,24 @@ func _test_game() -> void:
 	check(main.ready_done, "游戏主循环运行正常")
 
 	await _test_save_load(main)
+
+
+func _test_screen(main: Node2D) -> void:
+	print("== 屏幕适配 ==")
+	check(GameSession.content_size_for(Vector2(1280, 720)) == Vector2i(1280, 720), "1280×720 窗口：原样显示")
+	check(GameSession.content_size_for(Vector2(2560, 1440)) == Vector2i(1280, 720), "大窗口：整体放大")
+	var small := GameSession.content_size_for(Vector2(800, 500))
+	check(small.x < 1000 and small.x >= 940, "小窗口：画面最多缩到 85%%，画布变成 %s" % [small])
+	var hud: Hud = main.hud
+	var total := ItemDB.recipes().size()
+	for win in [Vector2(800, 500), Vector2(1000, 600), Vector2(1280, 720), Vector2(1366, 768), Vector2(1600, 1200), Vector2(2560, 1440)]:
+		var vs := Vector2(GameSession.content_size_for(win))
+		var lay := hud.craft_layout(vs)
+		var panel := hud.craft_panel_rect(lay)
+		var status := Rect2(vs.x - Hud.STATUS_WIDTH - 16.0, 0, Hud.STATUS_WIDTH + 16.0, 140.0)   # 右上角生命/法力/时间
+		var fits := panel.end.x <= vs.x and panel.end.y <= vs.y and panel.position.x >= 0.0 and not panel.intersects(status)
+		var reachable := int(lay.cols) * (int(lay.rows) + int(lay.max_scroll)) >= total
+		check(fits and reachable, "窗口 %d×%d：制作栏放得下（%s，%d 列 × %d 行，可翻 %d 行）" % [win.x, win.y, "右边" if lay.side else "下面", lay.cols, lay.rows, lay.max_scroll])
 
 
 const GAME_VIEW := Vector2(640, 360)   ## 1280×720 窗口、2 倍缩放时看到的世界范围

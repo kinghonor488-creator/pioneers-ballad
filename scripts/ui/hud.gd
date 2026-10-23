@@ -7,7 +7,9 @@ const SLOT := 44.0
 const GAP := 4.0
 const ORIGIN := Vector2(16, 16)
 const RECIPE_SIZE := 38.0
-const RECIPE_COLS := 12
+const RECIPE_STEP := RECIPE_SIZE + 4.0
+const MAX_RECIPE_COLS := 15
+const STATUS_WIDTH := 220.0      ## 右上角状态区的宽度
 const MESSAGE_TIME := 4.0
 const FONT_NAMES := ["PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei"]
 
@@ -26,6 +28,7 @@ var _banner_t := 0.0
 var _tip: Array = []
 var _stations := {}
 var _station_timer := 0.0
+var craft_scroll := 0          ## 制作栏往下翻了几行
 
 
 func _ready() -> void:
@@ -103,17 +106,66 @@ func acc_rect(j: int) -> Rect2:
 	return Rect2(ORIGIN + Vector2(Inventory.HOTBAR_SIZE * (SLOT + GAP) + 16.0, 10.0 + (j + 1) * (SLOT + GAP)), Vector2(SLOT, SLOT))
 
 
+## 制作栏的布局会跟着屏幕大小变：
+##   屏幕够宽 → 放在背包右边；不够宽 → 放在背包下面。
+##   能放几列就放几列，能放几行就放几行，放不下的用鼠标滚轮翻页。
+func craft_layout(vs: Vector2 = Vector2.ZERO) -> Dictionary:
+	if vs == Vector2.ZERO:
+		vs = get_viewport_rect().size
+	var total := ItemDB.recipes().size()
+	var inv_right := acc_rect(0).end.x + 10.0
+	var side_x := inv_right + 20.0
+	# 右上角是生命/法力/时间（宽 STATUS_WIDTH），制作栏不能盖住它
+	var side_cols := int((vs.x - STATUS_WIDTH - 40.0 - side_x - 26.0) / RECIPE_STEP)
+	var origin: Vector2
+	var cols: int
+	var side := side_cols >= 8
+	if side:
+		origin = Vector2(side_x + 10.0, ORIGIN.y + 30.0)
+		cols = mini(side_cols, MAX_RECIPE_COLS)
+	else:
+		origin = ORIGIN + Vector2(0, 5 * (SLOT + GAP) + 44.0)
+		cols = clampi(int((vs.x - 2.0 * ORIGIN.x - 10.0) / RECIPE_STEP), 4, MAX_RECIPE_COLS)
+	var total_rows := ceili(float(total) / cols)
+	# 底下要留出重铸按钮、提示文字和消息的位置
+	var room_rows := int((vs.y - origin.y - 110.0) / RECIPE_STEP)
+	var rows := clampi(room_rows, 2, total_rows)
+	var max_scroll := maxi(0, total_rows - rows)
+	return {"origin": origin, "cols": cols, "rows": rows, "total_rows": total_rows, "max_scroll": max_scroll, "side": side}
+
+
 func craft_origin() -> Vector2:
-	return ORIGIN + Vector2(0, 5 * (SLOT + GAP) + 44.0)
+	return craft_layout().origin
 
 
-func recipe_rect(k: int) -> Rect2:
-	return Rect2(craft_origin() + Vector2((k % RECIPE_COLS) * (RECIPE_SIZE + 4.0), (k / RECIPE_COLS) * (RECIPE_SIZE + 4.0)), Vector2(RECIPE_SIZE, RECIPE_SIZE))
+## 第 k 个配方的格子；翻页后不在屏幕上的返回空矩形
+func recipe_rect(k: int, lay: Dictionary = {}) -> Rect2:
+	if lay.is_empty():
+		lay = craft_layout()
+	var cols: int = lay.cols
+	var row := k / cols - mini(craft_scroll, lay.max_scroll)
+	if row < 0 or row >= int(lay.rows):
+		return Rect2()
+	return Rect2(Vector2(lay.origin) + Vector2((k % cols) * RECIPE_STEP, row * RECIPE_STEP), Vector2(RECIPE_SIZE, RECIPE_SIZE))
 
 
-func reforge_rect() -> Rect2:
-	var rows := ceili(float(ItemDB.recipes().size()) / RECIPE_COLS)
-	return Rect2(craft_origin() + Vector2(0, rows * (RECIPE_SIZE + 4.0) + 8.0), Vector2(250, 30))
+func reforge_rect(lay: Dictionary = {}) -> Rect2:
+	if lay.is_empty():
+		lay = craft_layout()
+	return Rect2(Vector2(lay.origin) + Vector2(0, int(lay.rows) * RECIPE_STEP + 8.0), Vector2(250, 30))
+
+
+func craft_panel_rect(lay: Dictionary = {}) -> Rect2:
+	if lay.is_empty():
+		lay = craft_layout()
+	var c0 := Vector2(lay.origin) - Vector2(10, 30)
+	var r := reforge_rect(lay)
+	var w := maxf(int(lay.cols) * RECIPE_STEP + 16.0, 270.0)
+	return Rect2(c0, Vector2(w, r.end.y + 26.0 - c0.y))
+
+
+func scroll_crafting(delta_rows: int) -> void:
+	craft_scroll = clampi(craft_scroll + delta_rows, 0, int(craft_layout().max_scroll))
 
 
 func _panel_rects() -> Array:
@@ -122,9 +174,7 @@ func _panel_rects() -> Array:
 		var a := slot_rect(0).position - Vector2(10, 10)
 		var b := Vector2(acc_rect(0).end.x, slot_rect(Inventory.SIZE - 1).end.y) + Vector2(10, 10)
 		rects.append(Rect2(a, b - a))
-		var r := reforge_rect()
-		var c0 := craft_origin() - Vector2(10, 34)
-		rects.append(Rect2(c0, Vector2(RECIPE_COLS * (RECIPE_SIZE + 4.0) + 16, r.end.y - c0.y + 10)))
+		rects.append(craft_panel_rect())
 	return rects
 
 
@@ -174,7 +224,11 @@ func _input(event: InputEvent) -> void:
 				_click_menu(mb.position)
 			get_viewport().set_input_as_handled()
 			return
-		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+		var wheel := mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN
+		if wheel and inventory_open and craft_panel_rect().has_point(mb.position):
+			scroll_crafting(-1 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1)   # 滚轮翻制作栏
+			get_viewport().set_input_as_handled()
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			game.inventory.selected = posmod(game.inventory.selected - 1, Inventory.HOTBAR_SIZE)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			game.inventory.selected = posmod(game.inventory.selected + 1, Inventory.HOTBAR_SIZE)
@@ -271,11 +325,12 @@ func _click(pos: Vector2, right: bool) -> bool:
 			_swap_with_cursor(inv.accessories, j, true)
 			return true
 	var recipes := ItemDB.recipes()
+	var lay := craft_layout()
 	for k in recipes.size():
-		if recipe_rect(k).has_point(pos):
+		if recipe_rect(k, lay).has_point(pos):
 			game.craft(recipes[k])
 			return true
-	if reforge_rect().has_point(pos):
+	if reforge_rect(lay).has_point(pos):
 		game.reforge_selected()
 		return true
 	for r in _panel_rects():
@@ -437,12 +492,24 @@ func _draw_inventory(inv: Inventory, m: Vector2) -> void:
 	for st in ["workbench", "furnace", "anvil"]:
 		if _stations.has(st):
 			names.append(ItemDB.STATION_NAMES[st])
-	var co := craft_origin()
-	_text(co + Vector2(0, -12), "制作  ·  附近的制作站：%s" % ("、".join(names) if not names.is_empty() else "无（徒手）"), 14, Color(1, 0.9, 0.6))
+	var lay := craft_layout()
+	craft_scroll = mini(craft_scroll, int(lay.max_scroll))
+	var co: Vector2 = lay.origin
+	_text(co + Vector2(0, -12), "制作 · 制作站：%s" % ("、".join(names) if not names.is_empty() else "徒手"), 14, Color(1, 0.9, 0.6))
+	if int(lay.max_scroll) > 0:
+		var page := "滚轮翻页  %d/%d 行" % [craft_scroll + int(lay.rows), int(lay.total_rows)]
+		var pw := font.get_string_size(page, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		_text(co + Vector2(int(lay.cols) * RECIPE_STEP - pw - 4.0, -12), page, 12, Color(0.75, 0.8, 1))
+		if craft_scroll > 0:
+			_text(co + Vector2(int(lay.cols) * RECIPE_STEP * 0.5 - 4.0, -1), "▲", 10, Color(1, 1, 1, 0.6))
+		if craft_scroll < int(lay.max_scroll):
+			_text(co + Vector2(int(lay.cols) * RECIPE_STEP * 0.5 - 4.0, int(lay.rows) * RECIPE_STEP + 2.0), "▼", 10, Color(1, 1, 1, 0.6))
 	var recipes := ItemDB.recipes()
 	for k in recipes.size():
 		var rc: Dictionary = recipes[k]
-		var r := recipe_rect(k)
+		var r := recipe_rect(k, lay)
+		if r.size == Vector2.ZERO:
+			continue
 		var has_station := _stations.has(rc.station)
 		var ok: bool = has_station and game.has_ingredients(rc)
 		var preview := ItemDB.make(rc.result, int(rc.count))
@@ -453,7 +520,7 @@ func _draw_inventory(inv: Inventory, m: Vector2) -> void:
 			draw_rect(r.grow(-1), Color(0.5, 1, 0.5, 0.6), false, 1.0)
 		if r.has_point(m):
 			_tip = _recipe_tip(rc, has_station)
-	var rr := reforge_rect()
+	var rr := reforge_rect(lay)
 	var sel: Variant = inv.selected_item()
 	var can := _stations.has("anvil") and ItemDB.has_affix_slot(sel)
 	draw_rect(rr, Color(0.3, 0.2, 0.45, 0.9) if can else Color(0.15, 0.15, 0.2, 0.8))
@@ -463,7 +530,7 @@ func _draw_inventory(inv: Inventory, m: Vector2) -> void:
 		_tip = [["重铸", Color(0.8, 0.6, 1)], ["站在铁砧旁，花 2 个灵晶碎片给快捷栏选中的工具或武器重新随机一个词缀。", Color(0.85, 0.85, 0.9)]]
 		if sel != null and ItemDB.has_affix_slot(sel):
 			_tip.append(["当前：" + ItemDB.display_name(sel), ItemDB.rarity_color(sel)])
-	_text(rr.position + Vector2(270, 21), "左键拿起/放下 · 右键背包里的饰品可直接装备", 12, Color(0.7, 0.72, 0.8))
+	_text(rr.position + Vector2(0, 44), "左键拿起/放下 · 右键饰品直接装备", 12, Color(0.7, 0.72, 0.8))
 
 
 func _recipe_tip(rc: Dictionary, has_station: bool) -> Array:
@@ -483,7 +550,7 @@ func _recipe_tip(rc: Dictionary, has_station: bool) -> Array:
 
 func _draw_status(vs: Vector2) -> void:
 	var p: Player = game.player
-	var w := 220.0
+	var w := STATUS_WIDTH
 	var x := vs.x - w - 16.0
 	var r := Rect2(x, 16, w, 18)
 	draw_rect(r, Color(0.15, 0.05, 0.07, 0.8))
