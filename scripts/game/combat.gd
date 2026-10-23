@@ -320,8 +320,14 @@ func max_enemies() -> int:
 		return 2   # Boss 战时少刷一点小怪
 	if game.underground_factor() > 0.5:
 		return 7
+	if int(game.day) <= 1:
+		return 3   # 第一天晚上照顾新手：地面上的怪不会变多
 	var night := 1.0 - SkyBackdrop.daylight(game.time_of_day)
 	return 3 + int(night * 4.0)
+
+
+func debris_fade(e: Enemy) -> void:
+	game.debris.burst(e.center(), Color(e.def.color), 8, 40.0, 30.0)
 
 
 func is_night() -> bool:
@@ -402,7 +408,10 @@ func _despawn() -> void:
 			continue
 		var d: float = e.center().distance_to(pc) / 16.0
 		var night_only: bool = e.def.spawn.get("time", "any") == "night"
-		if d > DESPAWN_DIST or (day and night_only and d > 30.0):
+		if e.gave_up():
+			popup(e.center(), "……", Color(0.7, 0.85, 1.0))   # 游魂找不到你，慢慢散去
+			debris_fade(e)
+		if d > DESPAWN_DIST or (day and night_only and d > 30.0) or e.gave_up():
 			e.queue_free()
 			e.hp = 0.0
 

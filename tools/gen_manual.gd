@@ -143,6 +143,8 @@ func _enemies() -> String:
 		var traits: String = ai_names.get(d.ai, d.ai)
 		if d.get("phase", false):
 			traits += "，能穿墙"
+		if d.get("surface_only", false):
+			traits += "，但钻不进地下（躲到地下它会放弃离开）"
 		if d.has("glow"):
 			traits += "，会发光"
 		var inflict := "—"

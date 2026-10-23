@@ -9,6 +9,7 @@ extends RefCounted
 ##   turret  长在地上不动，玩家靠近就吐种子（毒刺花）
 ## spawn.biomes：只在这些生物群系出现（不写 = 哪里都可以，但在雪原/丛林/水晶洞里出现得少一些）
 ## inflict：碰到玩家时给玩家加的负面效果 [名字, 秒数, 几率]
+## surface_only：只在地面附近活动（能穿过地面上的树和墙，但钻不进地下太深；玩家躲到地下它就会放弃离开）
 ## spawn.layers 用的是 WorldData.layer_name() 返回的层名；time 是 "any" / "day" / "night"。
 ## drops: [道具 id, 最少, 最多, 几率]
 ## Boss（boss = true）不会自然刷出，只能用召唤道具叫出来；choice 里的武器会随机掉一把。
@@ -21,7 +22,7 @@ const DEFS := {
 		"spawn": {"layers": ["地表"], "time": "any", "weight": 10},
 	},
 	"wisp": {
-		"name": "游魂", "ai": "flyer", "art": "wisp", "color": Color(0.6, 0.9, 1.0), "phase": true, "glow": 3.0,
+		"name": "游魂", "ai": "flyer", "art": "wisp", "color": Color(0.6, 0.9, 1.0), "phase": true, "glow": 3.0, "surface_only": true,
 		"hp": 30, "damage": 12, "defense": 2, "size": Vector2(12, 12), "speed": 70.0, "kb_resist": 0.3,
 		"drops": [["wisp_dust", 1, 2, 0.8]],
 		"spawn": {"layers": ["地表", "天空"], "time": "night", "weight": 9},

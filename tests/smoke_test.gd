@@ -854,6 +854,44 @@ func _test_combat(main: Node2D) -> void:
 	p.velocity = Vector2.ZERO
 	p.invuln = 5.0
 
+	# 游魂只在地面附近活动：躲到地下它够不着，过一会儿就放弃离开
+	cb.clear()
+	var wx := floori(p.center().x / 16.0)
+	var hide_y: int = main.world.surface_at(wx) + 12
+	for dy in range(-1, 2):
+		main.world.set_tile(wx, hide_y + dy, TileDB.AIR)
+	main.world.set_tile(wx, hide_y + 2, TileDB.STONE)
+	p.teleport(Vector2(wx * 16 + 2, (hide_y + 2) * 16 - Player.H - 0.01))
+	var wisp := cb.spawn("wisp", Vector2(wx * 16, (main.world.surface_at(wx) - 6) * 16))
+	p.invuln = 0.0
+	p.hp = 100.0
+	var deepest := 0.0
+	for i in 300:
+		cb.physics_tick(1.0 / 60.0)
+		if is_instance_valid(wisp):
+			deepest = maxf(deepest, wisp.position.y)
+	var limit := float(main.world.surface_at(wx) + Enemy.SURFACE_DEPTH) * 16.0
+	check(deepest <= limit + 1.0, "游魂钻不进地下太深（最深到地面下 %.1f 格）" % (deepest / 16.0 - main.world.surface_at(wx)))
+	check(p.hp == 100.0, "躲在地下的玩家不会被游魂打到")
+	for i in 720:
+		cb.physics_tick(1.0 / 60.0)
+	check(not is_instance_valid(wisp) or wisp.hp <= 0.0, "玩家一直躲在地下，游魂过一会儿就放弃离开")
+	cb.clear()
+	p.teleport(main.spawn_position())
+	for i in 30:
+		p.step(1.0 / 60.0, 0.0, false, false)
+	# 第一天晚上地面上的怪不会变多
+	var old_day: int = main.day
+	var old_time: float = main.time_of_day
+	main.time_of_day = 0.0
+	main.day = 1
+	var cap1: int = cb.max_enemies()
+	main.day = 2
+	var cap2: int = cb.max_enemies()
+	check(cap1 == 3 and cap2 > cap1, "第一天晚上地面最多 %d 只怪，之后的夜晚最多 %d 只" % [cap1, cap2])
+	main.day = old_day
+	main.time_of_day = old_time
+
 	# 弓和箭
 	var bow := ItemDB.make("wooden_bow")
 	for i in inv.slots.size():

@@ -6,6 +6,8 @@ extends TileBody
 signal died(enemy: Enemy)
 
 const GRAVITY := 1100.0
+const SURFACE_DEPTH := 3        ## surface_only 的敌人最多能钻到原本地面以下几格
+const GIVE_UP_TIME := 15.0      ## 玩家躲在它够不着的地下多久，它就放弃离开
 const MAX_FALL := 700.0
 
 var id := ""
@@ -26,6 +28,7 @@ var _fly_dir := Vector2.ZERO
 var _squash := 0.0
 var poison_t := 0.0          ## 中毒剩余时间（毒刺短剑造成）
 var _poison_acc := 0.0
+var out_of_reach_t := 0.0    ## surface_only：玩家已经在它够不着的地方待了多久
 
 
 func setup(enemy_id: String, w: WorldData, player: Player, combat_ref: Node) -> void:
@@ -152,9 +155,28 @@ func _ai_walker(delta: float, to_p: Vector2) -> void:
 
 
 func _ai_flyer(delta: float, to_p: Vector2) -> void:
-	var desired := to_p.normalized() * float(def.speed) + Vector2(0, sin(_t * 3.0) * 30.0)
+	var goal := target.center()
+	if def.get("surface_only", false):
+		# 只能在地面附近活动：目标点最多压到地面以下 SURFACE_DEPTH 格
+		var floor_y := (world.surface_at(int(center().x / TS)) + SURFACE_DEPTH) * TS
+		if goal.y > floor_y:
+			goal.y = floor_y - 8.0
+			out_of_reach_t += delta
+		else:
+			out_of_reach_t = 0.0
+	var desired := (goal - center()).normalized() * float(def.speed) + Vector2(0, sin(_t * 3.0) * 30.0)
 	velocity = velocity.move_toward(desired, 160.0 * delta)
 	_move(delta)
+	if def.get("surface_only", false):
+		var limit := (world.surface_at(int(center().x / TS)) + SURFACE_DEPTH) * TS - body_size.y
+		if position.y > limit:
+			position.y = limit
+			velocity.y = minf(velocity.y, 0.0)
+
+
+## surface_only 的敌人：玩家躲到地下太久就放弃
+func gave_up() -> bool:
+	return out_of_reach_t >= GIVE_UP_TIME
 
 
 func _ai_bat(delta: float, to_p: Vector2) -> void:
