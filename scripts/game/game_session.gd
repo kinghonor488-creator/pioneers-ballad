@@ -10,6 +10,21 @@ static var world_size := Vector2i(4200, 1200)
 static var message := ""              ## 回到标题界面时要显示的提示（例如读档失败）
 
 
+## 全屏快捷键：F11、Alt+Enter，或者 macOS 习惯的 Ctrl+Cmd+F
+static func is_fullscreen_key(event: InputEvent) -> bool:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return false
+	var k: int = event.physical_keycode
+	return k == KEY_F11 or (k == KEY_ENTER and event.alt_pressed) or (k == KEY_F and event.ctrl_pressed and event.meta_pressed)
+
+
+static func toggle_fullscreen() -> void:
+	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
 static func reset() -> void:
 	save_path = ""
 	load_existing = false

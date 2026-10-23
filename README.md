@@ -7,16 +7,22 @@
 
 ## 如何运行
 
-1. 安装 Godot 4（已通过 `brew install --cask godot` 安装 4.7.2，位置 `/Applications/Godot.app`）。
-2. 打开 Godot → 项目管理器里点 **导入** → 选择本文件夹里的 `project.godot`。
-   （也可以直接双击 `project.godot`，或在终端运行 `godot --path /Users/sunyubo/Desktop/泰拉瑞亚 --editor`）
-3. 在编辑器里按 **F5** 开始游戏。
+**最简单：双击项目文件夹里的「拓荒者之歌.app」**，直接开始玩，不用打开 Godot 编辑器。
+可以把它拖到程序坞（Dock）或桌面上，以后一点就开。
+（如果 .app 不见了或者坏了，运行 `bash tools/make_launcher.sh` 重新生成。需要已经安装 Godot：`brew install --cask godot`）
 
-不打开编辑器、直接玩：
+想改代码时再用编辑器：打开 Godot → 导入本文件夹里的 `project.godot` → 按 **F5**。
+
+也可以在终端里运行：
 
 ```bash
 godot --path /Users/sunyubo/Desktop/泰拉瑞亚
 ```
+
+**窗口和全屏**：游戏启动时窗口是最大化的，画面会自动缩放填满窗口（任意分辨率、任意比例都可以）。
+按 **F11**、**Ctrl+Cmd+F** 或 **Alt+Enter** 切换全屏，标题界面上也有「全屏」按钮。
+> 在 Godot 编辑器里按 F5 时，游戏默认嵌在编辑器的「Game」面板里、固定 1280×720。想让它填满面板，
+> 点面板右上角分辨率旁边的 ⋮ 菜单，换成按比例缩放 / 拉伸的选项；或者在同一个菜单里关掉嵌入，让游戏单独开一个窗口。
 
 启动后先进入**标题界面**：可以继续已有的世界，或者创建新世界（名字、种子、小/中/大三种尺寸）。
 最大的 4200×1200 世界生成约 1 秒，存档约 450 KB，保存和读取都只要几毫秒。
@@ -42,6 +48,7 @@ godot --path /Users/sunyubo/Desktop/泰拉瑞亚
 | 鼠标左键（按住） | 使用快捷栏选中的道具：拿镐/斧时挖掘，拿方块时放置，拿药水时喝，拿炸弹时扔，拿武器时朝鼠标方向攻击 |
 | 1 ~ 0、鼠标滚轮 | 选择快捷栏格子 |
 | E / Tab / I | 打开或关闭背包和制作栏 |
+| F11 / Ctrl+Cmd+F / Alt+Enter | 切换全屏 |
 | Esc | 关闭背包；没开背包时打开暂停菜单（保存 / 回到标题 / 退出） |
 | 背包里左键 | 拿起 / 放下 / 交换道具；拖到右边"饰品"栏即可装备 |
 | 背包里右键饰品 | 直接装备 |
@@ -184,6 +191,8 @@ shaders/lighting.gdshader 把光照图乘到画面上
   ui/hud.gd              界面
 tests/smoke_test.gd      自动化冒烟测试
 tools/export_art.gd      把生成的像素图导出成 PNG（assets/generated/）
+tools/make_launcher.sh   生成双击启动用的「拓荒者之歌.app」
+tools/export_icon.gd     把 icon.svg 渲染成启动器图标
 tools/screenshot.gd      开发用截图工具
 ```
 

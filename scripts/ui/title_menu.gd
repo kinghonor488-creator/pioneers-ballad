@@ -90,6 +90,11 @@ func _ready() -> void:
 	create.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	create.pressed.connect(_create_world)
 	buttons.add_child(create)
+	var full_btn := Button.new()
+	full_btn.text = "全屏"
+	full_btn.tooltip_text = "也可以按 F11 / Ctrl+Cmd+F 切换"
+	full_btn.pressed.connect(GameSession.toggle_fullscreen)
+	buttons.add_child(full_btn)
 	var quit_btn := Button.new()
 	quit_btn.text = "退出游戏"
 	quit_btn.pressed.connect(func(): get_tree().quit())
@@ -111,6 +116,12 @@ func _ready() -> void:
 	add_child(confirm)
 
 	refresh_list()
+
+
+func _input(event: InputEvent) -> void:
+	if GameSession.is_fullscreen_key(event):
+		GameSession.toggle_fullscreen()
+		get_viewport().set_input_as_handled()
 
 
 func _process(delta: float) -> void:

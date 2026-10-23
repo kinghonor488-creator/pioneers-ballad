@@ -1,5 +1,10 @@
 ; Engine configuration file.
-; 拓荒者之歌 Pioneer's Ballad
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
@@ -8,24 +13,22 @@ config_version=5
 config/name="拓荒者之歌 Pioneer's Ballad"
 config/description="一个原创的 2D 沙盒冒险游戏（开发中）。"
 run/main_scene="res://scenes/title.tscn"
-config/features=PackedStringArray("4.7", "GL Compatibility")
-config/icon="res://icon.svg"
-; 存档文件夹固定用这个英文名（~/Library/Application Support/PioneersBallad），以后再改游戏名也不会丢存档
 config/use_custom_user_dir=true
 config/custom_user_dir_name="PioneersBallad"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.svg"
 
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
-
-[physics]
-
-common/physics_ticks_per_second=60
+window/size/mode=2
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
 
 [rendering]
 
+textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-textures/canvas_textures/default_texture_filter=0
 environment/defaults/default_clear_color=Color(0.03, 0.03, 0.05, 1)

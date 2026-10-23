@@ -144,6 +144,10 @@ func blocks_mouse() -> bool:
 # ---------------------------------------------------------------- 输入
 
 func _input(event: InputEvent) -> void:
+	if GameSession.is_fullscreen_key(event):
+		GameSession.toggle_fullscreen()
+		get_viewport().set_input_as_handled()
+		return
 	if game == null or not game.ready_done:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -510,7 +514,7 @@ func _draw_status(vs: Vector2) -> void:
 		var debuff := bool(b.get("debuff", false))
 		_text(Vector2(x, y), ("✖ %s  %d 秒" if debuff else "✧ %s  %d 秒") % [buff_name, ceili(b.time)], 13, Color(1, 0.5, 0.45) if debuff else Color(0.6, 0.9, 1))
 		y += 18.0
-	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
+	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档 · F11 全屏", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))
 
 
