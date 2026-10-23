@@ -43,6 +43,7 @@ var lighting: Lighting
 var liquids: LiquidSim
 var debris: Debris
 var drops: Array = []            ## 地上的掉落物（ItemDrop）
+var move_input := 0.0            ## 这一帧左右方向键的输入（-1 ~ 1），近战攻击方向跟着它走
 var _swing_clock := 999.0        ## 按住挖掘时的挥动节奏
 var _impact_pending := false
 var breath := BASE_BREATH
@@ -234,6 +235,7 @@ func _physics_process(delta: float) -> void:
 	if not ready_done or dead or hud.menu_open:
 		return
 	var dir := Input.get_axis("move_left", "move_right")
+	move_input = dir
 	player.step(delta, dir, Input.is_action_just_pressed("jump"), Input.is_action_pressed("jump"))
 	combat.physics_tick(delta)
 	_tick_drops(delta)

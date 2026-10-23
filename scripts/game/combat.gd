@@ -95,8 +95,14 @@ func use_weapon(item: Dictionary, target_px: Vector2) -> bool:
 	var speed := ItemDB.weapon_speed(item) * (1.0 + float(game.stats.get("speed", 0.0)))
 	match String(w.type):
 		"melee":
+			# 近战往哪边砍：按着方向键就跟着移动方向，否则朝鼠标那一边
+			var mv := float(game.move_input)
+			var dir := (1 if mv > 0.0 else -1) if absf(mv) > 0.1 else (1 if aim.x >= 0.0 else -1)
 			var dur := clampf(0.85 / speed, 0.14, 0.35)
-			_swing = {"t": 0.0, "dur": dur, "dir": 1 if aim.x >= 0.0 else -1, "weapon": item, "range": float(w.range), "hit": {}, "damage": true}
+			_swing = {"t": 0.0, "dur": dur, "dir": dir, "weapon": item, "range": float(w.range), "hit": {}, "damage": true}
+			p.facing = dir
+			_cooldown = 1.0 / speed
+			return true
 		"bow":
 			var slot := find_ammo("arrow")
 			if slot < 0:
@@ -179,6 +185,7 @@ func _update_swing(delta: float) -> void:
 	if not _swing.damage:
 		return
 	var p := player()
+	_swing.dir = p.facing   # 挥到一半掉头，剑也跟着转过去
 	var r: float = _swing.range
 	var dir: int = _swing.dir
 	var c := p.center()

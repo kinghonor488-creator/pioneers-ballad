@@ -813,6 +813,30 @@ func _test_combat(main: Node2D) -> void:
 	check(beetle.hp < beetle.max_hp, "挥剑砍中身前的岩甲虫")
 	p.invuln = 5.0
 
+	# 一边移动一边攻击：剑往移动方向砍；挥到一半掉头，剑也跟着转
+	cb.clear()
+	var left_e := cb.spawn("rock_beetle", p.position + Vector2(-22, 2))
+	var right_e := cb.spawn("rock_beetle", p.position + Vector2(14, 2))
+	var mouse_right := p.center() + Vector2(120, 0)
+	main.move_input = -1.0
+	p.step(1.0 / 60.0, -1.0, false, false)
+	cb._cooldown = 0.0
+	check(cb.use_weapon(sword, mouse_right) and int(cb._swing.dir) == -1 and p.facing == -1, "鼠标在右边、按着左键移动时，剑往左边砍")
+	cb._update_swing(0.02)
+	check(left_e.hp < left_e.max_hp and right_e.hp == right_e.max_hp, "砍中左边的敌人，没砍到右边的")
+	main.move_input = 1.0
+	p.step(1.0 / 60.0, 1.0, false, false)
+	cb._update_swing(0.02)
+	check(p.facing == 1 and int(cb._swing.dir) == 1 and right_e.hp < right_e.max_hp, "挥到一半改按右键，人和剑都转向右边，砍中右边的敌人")
+	main.move_input = 0.0
+	cb._swing = {}
+	cb._cooldown = 0.0
+	check(cb.use_weapon(sword, p.center() + Vector2(-120, 0)) and int(cb._swing.dir) == -1, "不按方向键时，还是朝鼠标那边砍")
+	cb.clear()
+	cb._swing = {}
+	p.velocity = Vector2.ZERO
+	p.invuln = 5.0
+
 	# 弓和箭
 	var bow := ItemDB.make("wooden_bow")
 	for i in inv.slots.size():
