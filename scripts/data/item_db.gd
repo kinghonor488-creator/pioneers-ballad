@@ -344,6 +344,8 @@ static func tooltip(inst: Variant) -> Array:
 				lines.append(["  " + t, blue])
 		if u.has("teleport"):
 			lines.append(["立刻传送回出生点", good])
+		if u.has("summon"):
+			lines.append(["召唤 Boss：%s" % EnemyDB.get_def(u.summon).name, Color(1.0, 0.5, 0.45)])
 		if u.has("maxhp"):
 			lines.append(["永久提升最大生命 %d（最多使用 5 次）" % int(u.maxhp), good])
 	if d.has("throw"):
@@ -496,6 +498,18 @@ static func _build_weapons() -> void:
 	_add("arrow", "箭矢", "ammo", 0, {"icon": "arrow", "color": Color(0.8, 0.8, 0.85), "ammo": {"type": "arrow", "damage": 2}})
 	_add("flame_arrow", "火焰箭", "ammo", 1, {"icon": "arrow", "color": Color(1.0, 0.55, 0.2), "ammo": {"type": "arrow", "damage": 5}})
 	_add("crystal_arrow", "灵晶箭", "ammo", 2, {"icon": "arrow", "color": Color(0.5, 1.0, 0.92), "ammo": {"type": "arrow", "damage": 7, "pierce": 3}})
+	# Boss：召唤道具和战利品
+	_add("mud_offering", "泥沼祭品", "consumable", 1, {"icon": "offering", "color": Color(0.55, 0.4, 0.25), "use": {"summon": "mud_colossus"}, "desc": "在地表使用，召唤泥沼巨像。"})
+	_add("crystal_beacon", "灵晶信标", "consumable", 2, {"icon": "beacon", "color": Color(0.45, 1.0, 0.9), "use": {"summon": "crystal_warden"}, "desc": "在洞穴层或深渊使用，召唤灵晶守望者。"})
+	_add("mud_heart", "泥王之心", "accessory", 3, {"icon": "heart", "color": Color(0.6, 0.42, 0.25), "effects": {"maxhp": 20, "defense": 3}, "desc": "击败泥沼巨像获得。仍在缓慢地跳动。"})
+	_add("colossus_shard", "巨像碎片", "material", 2, {"icon": "chitin", "color": Color(0.5, 0.38, 0.26), "desc": "泥沼巨像身上剥落的硬块。"})
+	_add("colossus_bulwark", "巨像壁垒", "accessory", 3, {"icon": "emblem", "color": Color(0.55, 0.42, 0.28), "effects": {"defense": 7}})
+	_add("warden_eye", "守望之眼", "accessory", 4, {"icon": "eye", "color": Color(0.45, 1.0, 0.9), "effects": {"crit": 0.1, "light": 4.0}, "desc": "击败灵晶守望者获得。它还在看着什么。"})
+	_add("warden_prism", "守望者棱晶", "material", 3, {"icon": "shard", "color": Color(0.85, 0.55, 1.0), "desc": "击败灵晶守望者获得。打造星辉镐和星辉剑必需。"})
+	_add_weapon("mud_hammer", "泥沼战锤", 3, "hammer", Color(0.5, 0.38, 0.26), {"type": "melee", "damage": 26, "speed": 1.4, "knockback": 9.0, "range": 38}, "泥沼巨像的拳头做成的锤子。")
+	_add_weapon("sludge_staff", "淤泥法杖", 3, "staff", Color(0.55, 0.42, 0.25), {"type": "staff", "damage": 18, "speed": 2.2, "knockback": 3.0, "mana": 6, "shot_speed": 300.0, "pierce": 2})
+	_add_weapon("prism_staff", "棱晶法杖", 4, "staff", Color(0.85, 0.55, 1.0), {"type": "staff", "damage": 26, "speed": 2.4, "knockback": 3.0, "mana": 8, "shot_speed": 420.0, "pierce": 5}, "一道光能贯穿一排敌人。")
+	_add_weapon("prism_crossbow", "棱光弩", 4, "bow", Color(0.85, 0.55, 1.0), {"type": "bow", "damage": 17, "speed": 3.2, "knockback": 2.0, "shot_speed": 620.0}, "连射如雨。")
 	# 怪物掉落的材料
 	_add("mud_core", "泥核", "material", 0, {"icon": "blob", "color": Color(0.55, 0.4, 0.25), "desc": "泥团怪身体里黏糊糊的核心。"})
 	_add("bat_wing", "蝠翼膜", "material", 1, {"icon": "wing", "color": Color(0.45, 0.32, 0.5), "desc": "又薄又韧。"})
@@ -515,10 +529,14 @@ static func _build_recipes() -> void:
 	_r("iron_sword", 1, "anvil", {"iron_bar": 9})
 	_r("iron_bow", 1, "anvil", {"iron_bar": 8, "bat_wing": 2})
 	_r("moonsilver_sword", 1, "anvil", {"moonsilver_bar": 11})
-	_r("starstone_sword", 1, "anvil", {"starstone_bar": 11, "crystal_shard": 3})
+	_r("starstone_sword", 1, "anvil", {"starstone_bar": 11, "warden_prism": 1})
 	_r("ember_greatsword", 1, "anvil", {"ember_bar": 14, "ember_core": 3})
 	_r("wisp_staff", 1, "workbench", {"wisp_dust": 8, "crystal_shard": 4, "wood": 3})
 	_r("ember_staff", 1, "anvil", {"ember_core": 4, "ember_bar": 8, "wisp_dust": 5})
+	# Boss 召唤道具和 Boss 材料
+	_r("mud_offering", 1, "workbench", {"mud_core": 15, "wood": 5})
+	_r("crystal_beacon", 1, "anvil", {"crystal_shard": 15, "moonsilver_bar": 5, "wisp_dust": 3})
+	_r("colossus_bulwark", 1, "anvil", {"colossus_shard": 12, "chitin": 6})
 	# 怪物材料做的饰品和道具
 	_r("spring_shoes", 1, "workbench", {"mud_core": 12, "iron_bar": 2})
 	_r("chitin_charm", 1, "anvil", {"chitin": 8, "iron_bar": 2})
@@ -558,7 +576,7 @@ static func _build_recipes() -> void:
 	_r("iron_pickaxe", 1, "anvil", {"iron_bar": 10, "wood": 3})
 	_r("iron_axe", 1, "anvil", {"iron_bar": 8, "wood": 3})
 	_r("moonsilver_pickaxe", 1, "anvil", {"moonsilver_bar": 12})
-	_r("starstone_pickaxe", 1, "anvil", {"starstone_bar": 12})
+	_r("starstone_pickaxe", 1, "anvil", {"starstone_bar": 12, "warden_prism": 2})
 	_r("ember_drill", 1, "anvil", {"ember_bar": 15, "starstone_bar": 5})
 	_r("big_bomb", 1, "anvil", {"bomb": 3, "iron_bar": 1})
 	_r("life_fruit", 1, "anvil", {"crystal_shard": 8, "apple": 3})

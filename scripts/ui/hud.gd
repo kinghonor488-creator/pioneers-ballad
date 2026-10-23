@@ -20,6 +20,9 @@ var cursor_item: Variant = null
 var messages: Array = []    ## [{"text", "color", "time", "key", "count"}]
 
 var _hint_cool := 0.0
+var _banner_text := ""
+var _banner_color := Color.WHITE
+var _banner_t := 0.0
 var _tip: Array = []
 var _stations := {}
 var _station_timer := 0.0
@@ -40,6 +43,7 @@ func setup(g: Node) -> void:
 
 func _process(delta: float) -> void:
 	_hint_cool = maxf(0.0, _hint_cool - delta)
+	_banner_t = maxf(0.0, _banner_t - delta)
 	for m in messages:
 		m.time -= delta
 	messages = messages.filter(func(m): return m.time > 0.0)
@@ -69,6 +73,14 @@ func notify_item(inst: Dictionary, count: int) -> void:
 	notify("+%d %s" % [count, key], ItemDB.rarity_color(inst))
 	messages[messages.size() - 1].key = key
 	messages[messages.size() - 1].count = count
+
+
+## 屏幕中间的大字公告（Boss 出现、击败 Boss……），同时也记进消息列表
+func banner(text: String, color: Color) -> void:
+	_banner_text = text
+	_banner_color = color
+	_banner_t = 3.5
+	notify(text, color)
 
 
 ## 有冷却的提示，避免按住鼠标时刷屏
@@ -207,6 +219,11 @@ func _draw_menu(vs: Vector2, m: Vector2) -> void:
 	_panel(Rect2(top, bottom - top), 0.95)
 	_text(top + Vector2(30, 44), "游戏暂停", 26, Color(1, 0.88, 0.5))
 	_text(top + Vector2(30, 70), "世界：%s · 已游玩 %s" % [game.world_name, SaveSystem.format_duration(game.play_time)], 13, Color(0.75, 0.78, 0.88))
+	var beaten := []
+	for bid in game.bosses:
+		beaten.append(String(EnemyDB.get_def(bid).get("name", bid)))
+	if not beaten.is_empty():
+		_text(top + Vector2(30, 86), "已击败：" + "、".join(beaten), 12, Color(1, 0.8, 0.35))
 	for i in MENU_BUTTONS.size():
 		var r := menu_button_rect(i)
 		var hover := r.has_point(m)
@@ -373,6 +390,12 @@ func _draw() -> void:
 
 	_draw_status(vs)
 	_draw_messages(vs)
+	_draw_boss_bar(vs)
+	if _banner_t > 0.0:
+		var c := _banner_color
+		c.a = clampf(_banner_t, 0.0, 1.0)
+		var tw := font.get_string_size(_banner_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+		_text(Vector2((vs.x - tw) * 0.5, vs.y * 0.28), _banner_text, 30, c)
 
 	if menu_open:
 		_draw_menu(vs, m)
@@ -483,6 +506,24 @@ func _draw_status(vs: Vector2) -> void:
 		y += 18.0
 	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))
+
+
+func _draw_boss_bar(vs: Vector2) -> void:
+	var b: Variant = game.combat.boss
+	if b == null or not is_instance_valid(b) or b.hp <= 0.0:
+		return
+	var w := 480.0
+	var r := Rect2((vs.x - w) * 0.5, vs.y - 64.0, w, 16.0)
+	_panel(r.grow(6.0), 0.8)
+	draw_rect(r, Color(0.2, 0.05, 0.06))
+	var k := clampf(b.hp / b.max_hp, 0.0, 1.0)
+	draw_rect(Rect2(r.position, Vector2(w * k, r.size.y)), Color(0.85, 0.2, 0.25) if b.phase == 1 else Color(0.95, 0.35, 0.1))
+	draw_line(r.position + Vector2(w * 0.5, 0), r.position + Vector2(w * 0.5, r.size.y), Color(1, 1, 1, 0.5), 1.0)
+	draw_rect(r, Color(1, 0.85, 0.5, 0.8), false, 1.0)
+	var label := "%s  %d / %d%s" % [b.def.name, ceili(b.hp), int(b.max_hp), "  · 二阶段" if b.phase == 2 else ""]
+	_text(r.position + Vector2(8, 13), label, 13)
+	if not b.visible:
+		_text(r.position + Vector2(w - 90, 13), "（钻进了地里）", 12, Color(0.9, 0.8, 0.6))
 
 
 func _draw_messages(vs: Vector2) -> void:

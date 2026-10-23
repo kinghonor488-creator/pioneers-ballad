@@ -453,5 +453,52 @@ static func paint_icon(img: Image, shape: String, c: Color) -> void:
 			_disc(img, o, Vector2(11, 8), 2.0, c)
 			_px(img, o, 4, 7, Color.WHITE)
 			_px(img, o, 10, 7, Color.WHITE)
+		"offering":
+			# 一个陶碗，里面盛着冒光的泥核
+			_rect(img, o, 2, 10, 13, 12, Color(0.62, 0.36, 0.22))
+			_rect(img, o, 3, 13, 12, 13, Color(0.5, 0.28, 0.16))
+			_rect(img, o, 2, 10, 13, 10, Color(0.75, 0.48, 0.3))
+			_disc(img, o, Vector2(8, 8), 3.6, c)
+			_px(img, o, 6, 6, c.lightened(0.5))
+			_px(img, o, 8, 2, Color(1, 0.9, 0.5))
+			_px(img, o, 5, 3, Color(1, 0.9, 0.5, 0.7))
+			_px(img, o, 11, 4, Color(1, 0.9, 0.5, 0.7))
+		"beacon":
+			_rect(img, o, 4, 12, 11, 14, Color(0.4, 0.4, 0.46))
+			_rect(img, o, 5, 11, 10, 11, Color(0.55, 0.55, 0.62))
+			for y in range(2, 11):
+				var half := 3 - absi(y - 6) / 2
+				for x in range(8 - half, 8 + half):
+					_px(img, o, x, y, c.lightened(0.3) if x < 8 else c)
+			_px(img, o, 7, 4, Color.WHITE)
+			_px(img, o, 2, 5, c)
+			_px(img, o, 13, 6, c)
+		"heart":
+			_disc(img, o, Vector2(5.5, 6.5), 3.3, c)
+			_disc(img, o, Vector2(10.5, 6.5), 3.3, c)
+			for y in range(7, 14):
+				for x in range(2 + (y - 7), 14 - (y - 7)):
+					_px(img, o, x, y, c)
+			_px(img, o, 5, 5, c.lightened(0.45))
+			_line(img, o, Vector2i(7, 7), Vector2i(9, 10), c.darkened(0.4))
+			_px(img, o, 12, 4, Color(0.35, 0.6, 0.25))
+		"hammer":
+			_line(img, o, Vector2i(2, 14), Vector2i(9, 7), WOOD)
+			_line(img, o, Vector2i(3, 14), Vector2i(10, 7), WOOD.darkened(0.3))
+			_rect(img, o, 7, 1, 14, 6, c)
+			_rect(img, o, 7, 1, 14, 1, c.lightened(0.3))
+			_rect(img, o, 7, 6, 14, 6, c.darkened(0.35))
+			_px(img, o, 9, 3, c.darkened(0.3))
+			_px(img, o, 12, 4, c.darkened(0.3))
+		"eye":
+			for y in range(4, 12):
+				var half := 6 - absi(y - 8) * 2
+				for x in range(8 - half, 8 + half):
+					_px(img, o, x, y, Color(0.95, 0.97, 1.0))
+			_disc(img, o, Vector2(8, 8), 2.8, c)
+			_disc(img, o, Vector2(8, 8), 1.3, Color(0.08, 0.1, 0.2))
+			_px(img, o, 7, 6, Color.WHITE)
+			_line(img, o, Vector2i(2, 8), Vector2i(7, 3), c.darkened(0.3))
+			_line(img, o, Vector2i(13, 8), Vector2i(9, 3), c.darkened(0.3))
 		_:
 			_rect(img, o, 2, 2, 13, 13, Color.MAGENTA)

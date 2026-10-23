@@ -10,6 +10,7 @@ const CONTACT_KNOCKBACK := 230.0
 
 var game: Node
 var enemies: Array = []
+var boss: Enemy = null           ## 当前在场的 Boss
 var projectiles: Array = []
 var spawning_enabled := true
 var popups: Array = []          ## 伤害数字 {"pos", "text", "color", "t", "vy"}
@@ -33,6 +34,9 @@ func player() -> Player:
 
 
 func clear() -> void:
+	if is_instance_valid(boss) and boss.hp > 0.0:
+		game.hud.notify("%s离开了……" % boss.def.name, Color(0.8, 0.7, 0.7))
+	boss = null
 	for e in enemies:
 		if is_instance_valid(e):
 			e.queue_free()
@@ -56,6 +60,8 @@ func physics_tick(delta: float) -> void:
 			p.tick(delta)
 	projectiles = projectiles.filter(func(p): return is_instance_valid(p) and not p.dead)
 	enemies = enemies.filter(func(e): return is_instance_valid(e) and e.hp > 0.0)
+	if boss != null and (not is_instance_valid(boss) or boss.hp <= 0.0):
+		boss = null
 	_update_swing(delta)
 	if not game.dead:
 		_contact_damage()
@@ -156,7 +162,7 @@ func _update_swing(delta: float) -> void:
 	var c := p.center()
 	var area := Rect2(c + Vector2(0.0 if dir > 0 else -r, -r * 0.85), Vector2(r, r * 1.6))
 	for e in enemies:
-		if is_instance_valid(e) and e.hp > 0.0 and not _swing.hit.has(e) and area.intersects(e.rect()):
+		if is_instance_valid(e) and e.hp > 0.0 and e.visible and not _swing.hit.has(e) and area.intersects(e.rect()):
 			_swing.hit[e] = true
 			deal_damage(e, _swing.weapon, 0.0, Vector2(dir, 0))
 
@@ -188,15 +194,65 @@ func deal_damage(e: Enemy, weapon: Variant, extra: float, dir: Vector2) -> int:
 func _on_enemy_died(e: Enemy) -> void:
 	for inst in EnemyDB.roll_drops(e.id, rng):
 		game.give(inst)
+	var choice: Array = e.def.get("choice", [])
+	if not choice.is_empty():
+		game.give(ItemDB.make(choice[rng.randi() % choice.size()], 1, rng))
 	game.on_enemy_killed(e.id)
+	if e == boss:
+		boss = null
+		game.on_boss_defeated(e.id)
 
 
-func spawn_hostile_shot(pos: Vector2, vel: Vector2, dmg: int) -> void:
-	var pr := _new_projectile("fireball", pos, vel, Color(1.0, 0.5, 0.2))
+func spawn_hostile_shot(pos: Vector2, vel: Vector2, dmg: int, kind: String = "fireball", phase: bool = false) -> void:
+	var colors := {"fireball": Color(1.0, 0.5, 0.2), "shard": Color(0.6, 1.0, 0.95), "wave": Color(0.6, 0.45, 0.3)}
+	var pr := _new_projectile(kind, pos, vel, colors.get(kind, Color.WHITE))
 	pr.hostile = true
 	pr.damage = dmg
-	pr.life = 4.0
-	pr.setup_light(2.0)
+	pr.phase = phase
+	pr.life = 4.0 if kind != "wave" else 2.2
+	if kind != "wave":
+		pr.setup_light(2.0 if kind == "fireball" else 1.5)
+
+
+# ---------------------------------------------------------------- Boss
+
+## 召唤 Boss。成功返回空字符串，失败返回原因。
+func summon_boss(id: String) -> String:
+	var d := EnemyDB.get_def(id)
+	if is_instance_valid(boss) and boss.hp > 0.0:
+		return "%s还在场上！" % boss.def.name
+	var layer: String = game.world.layer_name(int(player().center().y / 16.0))
+	var layers: Array = d.get("summon_layers", [])
+	if not layers.is_empty() and not layer in layers:
+		return "%s 只能在「%s」召唤（你现在在「%s」）。" % [d.name, "、".join(layers), layer]
+	var pos: Variant = null
+	var pc := Vector2i(player().center() / 16.0)
+	if EnemyDB.is_flying(id):
+		pos = player().center() + Vector2(280.0 if rng.randf() < 0.5 else -280.0, -170.0)
+	else:
+		for attempt in 30:
+			var side := 1 if rng.randf() < 0.5 else -1
+			pos = find_spawn_spot(pc.x + side * rng.randi_range(16, 26), pc.y - 12, id)
+			if pos != null:
+				break
+	if pos == null:
+		return "附近没有足够的空间让%s出现。" % d.name
+	boss = spawn(id, pos)
+	game.hud.banner(String(d.get("intro", d.name + "出现了！")), Color(1.0, 0.45, 0.4))
+	game.shake(6.0)
+	return ""
+
+
+func boss_left(b: Enemy) -> void:
+	game.hud.notify("%s离开了……" % b.def.name, Color(0.8, 0.7, 0.7))
+	b.hp = 0.0
+	b.queue_free()
+	boss = null
+
+
+func boss_phase_changed(b: Enemy) -> void:
+	game.hud.banner("%s被激怒了！" % b.def.name, Color(1.0, 0.35, 0.3))
+	game.shake(5.0)
 
 
 func hurt_player(amount: int, from: Vector2, reason: String) -> void:
@@ -209,7 +265,7 @@ func _contact_damage() -> void:
 		return
 	var pr := p.rect()
 	for e in enemies:
-		if is_instance_valid(e) and e.hp > 0.0 and pr.intersects(e.rect()):
+		if is_instance_valid(e) and e.hp > 0.0 and e.visible and pr.intersects(e.rect()):
 			hurt_player(int(e.def.damage), e.center(), String(e.def.name))
 			return
 
@@ -221,6 +277,8 @@ func popup(pos: Vector2, text: String, color: Color) -> void:
 # ---------------------------------------------------------------- 刷怪
 
 func max_enemies() -> int:
+	if is_instance_valid(boss):
+		return 2   # Boss 战时少刷一点小怪
 	if game.underground_factor() > 0.5:
 		return 7
 	var night := 1.0 - SkyBackdrop.daylight(game.time_of_day)
@@ -287,7 +345,7 @@ func _area_free(x0: int, y0: int, tw: int, th: int) -> bool:
 
 
 func spawn(id: String, pos: Vector2) -> Enemy:
-	var e := Enemy.new()
+	var e: Enemy = Boss.new() if EnemyDB.is_boss(id) else Enemy.new()
 	e.setup(id, game.world, player(), self)
 	e.position = pos
 	e.z_index = 6
@@ -301,7 +359,7 @@ func _despawn() -> void:
 	var pc := player().center()
 	var day := not is_night()
 	for e in enemies:
-		if not is_instance_valid(e):
+		if not is_instance_valid(e) or e == boss:
 			continue
 		var d: float = e.center().distance_to(pc) / 16.0
 		var night_only: bool = e.def.spawn.get("time", "any") == "night"

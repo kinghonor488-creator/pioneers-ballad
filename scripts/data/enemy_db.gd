@@ -8,6 +8,7 @@ extends RefCounted
 ##   shooter 和玩家保持距离，定时发射火球
 ## spawn.layers 用的是 WorldData.layer_name() 返回的层名；time 是 "any" / "day" / "night"。
 ## drops: [道具 id, 最少, 最多, 几率]
+## Boss（boss = true）不会自然刷出，只能用召唤道具叫出来；choice 里的武器会随机掉一把。
 
 const DEFS := {
 	"mudling": {
@@ -47,6 +48,25 @@ const DEFS := {
 		"drops": [["ember_core", 1, 1, 0.35]],
 		"spawn": {"layers": ["深渊"], "time": "any", "weight": 10},
 	},
+	# ---------------- Boss ----------------
+	"mud_colossus": {
+		"name": "泥沼巨像", "boss": true, "ai": "boss_mud", "art": "colossus", "color": Color(0.45, 0.33, 0.2),
+		"hp": 900, "damage": 22, "defense": 4, "size": Vector2(44, 36), "speed": 160.0, "kb_resist": 1.0,
+		"wave_damage": 16, "summon_layers": ["地表"],
+		"intro": "大地在震动……泥沼巨像苏醒了！",
+		"drops": [["mud_heart", 1, 1, 1.0], ["colossus_shard", 6, 10, 1.0], ["heal_potion", 2, 4, 1.0]],
+		"choice": ["mud_hammer", "sludge_staff"],
+		"spawn": {"layers": [], "time": "any", "weight": 0},
+	},
+	"crystal_warden": {
+		"name": "灵晶守望者", "boss": true, "ai": "boss_warden", "art": "warden", "color": Color(0.45, 1.0, 0.9), "phase": true, "glow": 6.0,
+		"hp": 2600, "damage": 30, "defense": 10, "size": Vector2(34, 34), "speed": 260.0, "kb_resist": 1.0,
+		"shard_damage": 20, "summon_layers": ["洞穴层", "深渊"],
+		"intro": "洞穴深处亮起冰冷的光……灵晶守望者降临了！",
+		"drops": [["warden_eye", 1, 1, 1.0], ["warden_prism", 3, 5, 1.0], ["heal_potion", 3, 5, 1.0]],
+		"choice": ["prism_staff", "prism_crossbow"],
+		"spawn": {"layers": [], "time": "any", "weight": 0},
+	},
 }
 
 ## 所有敌人都有的稀有掉落
@@ -58,7 +78,11 @@ static func get_def(id: String) -> Dictionary:
 
 
 static func is_flying(id: String) -> bool:
-	return String(get_def(id).get("ai", "")) in ["flyer", "bat", "shooter"]
+	return String(get_def(id).get("ai", "")) in ["flyer", "bat", "shooter", "boss_warden"]
+
+
+static func is_boss(id: String) -> bool:
+	return bool(get_def(id).get("boss", false))
 
 
 ## 某一层、某个时间能刷出来的敌人：[[id, 权重], ...]

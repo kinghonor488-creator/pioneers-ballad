@@ -45,6 +45,8 @@ var stats := {}                 ## 饰品 + 增益合计
 var life_fruits := 0
 var dead := false
 var kills := {}                 ## 敌人 id -> 击败数量
+var bosses := {}                ## Boss id -> 击败次数
+var _shake := 0.0
 
 var _mine_target := Vector2i(-99999, -99999)
 var _mine_progress := 0.0
@@ -232,6 +234,13 @@ func _process(delta: float) -> void:
 		_handle_use(delta)
 	renderer.update_view(player.center(), _view_size())
 	_update_ambient()
+	_shake = move_toward(_shake, 0.0, 25.0 * delta)
+	camera.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake if _shake > 0.0 else Vector2.ZERO
+
+
+## 屏幕震动（Boss 重砸、爆炸等）
+func shake(amount: float) -> void:
+	_shake = maxf(_shake, amount)
 
 
 func _update_time(delta: float) -> void:
@@ -507,6 +516,16 @@ func on_enemy_killed(enemy_id: String) -> void:
 	kills[enemy_id] = int(kills.get(enemy_id, 0)) + 1
 
 
+func on_boss_defeated(boss_id: String) -> void:
+	var first := not bosses.has(boss_id)
+	bosses[boss_id] = int(bosses.get(boss_id, 0)) + 1
+	var n := String(EnemyDB.get_def(boss_id).name)
+	hud.banner(("你击败了%s！" if first else "又一次击败了%s！") % n, RARITY_GOLD)
+	shake(8.0)
+	if save_path != "":
+		save_game(true)
+
+
 # ---------------------------------------------------------------- 放置、使用、投掷
 
 func place_item(t: Vector2i, slot: int) -> bool:
@@ -550,6 +569,11 @@ func use_consumable(slot: int) -> bool:
 	elif u.has("teleport"):
 		player.teleport(spawn_position())
 		hud.notify("一阵光芒闪过，你回到了出生点。", Color(0.8, 0.7, 1))
+	elif u.has("summon"):
+		var err: String = combat.summon_boss(String(u.summon))
+		if err != "":
+			hud.hint(err)
+			return false
 	elif u.has("maxhp"):
 		if life_fruits >= MAX_LIFE_FRUITS:
 			hud.hint("生命果已经吃到上限了。")
@@ -595,6 +619,7 @@ func explode(center: Vector2, radius: float) -> void:
 			if id == TileDB.AIR or id == TileDB.RELIC_CHEST or TileDB.tier(id) >= TileDB.UNBREAKABLE_TIER:
 				continue
 			world.set_tile(x, y, TileDB.AIR)
+	shake(radius * 1.5)
 	var blast := Blast.new()
 	blast.position = center
 	blast.radius_px = radius * TS
@@ -745,6 +770,7 @@ func make_save_header() -> Dictionary:
 			"dead": dead,
 			"life_fruits": life_fruits,
 			"kills": kills.duplicate(),
+			"bosses": bosses.duplicate(),
 			"buffs": buffs.duplicate(true),
 			"slots": inventory.slots.duplicate(true),
 			"accessories": inventory.accessories.duplicate(true),
@@ -776,6 +802,8 @@ func _apply_save(h: Dictionary) -> void:
 	life_fruits = clampi(int(p.get("life_fruits", 0)), 0, MAX_LIFE_FRUITS)
 	var saved_kills: Variant = p.get("kills", {})
 	kills = saved_kills.duplicate() if typeof(saved_kills) == TYPE_DICTIONARY else {}
+	var saved_bosses: Variant = p.get("bosses", {})
+	bosses = saved_bosses.duplicate() if typeof(saved_bosses) == TYPE_DICTIONARY else {}
 	buffs = {}
 	var saved_buffs: Dictionary = p.get("buffs", {})
 	for k in saved_buffs:

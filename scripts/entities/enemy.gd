@@ -47,7 +47,7 @@ func setup(enemy_id: String, w: WorldData, player: Player, combat_ref: Node) -> 
 
 
 func flying() -> bool:
-	return String(def.ai) in ["flyer", "bat", "shooter"]
+	return EnemyDB.is_flying(id)
 
 
 func tick(delta: float) -> void:

@@ -251,6 +251,7 @@ func _test_game() -> void:
 	check(main.world.get_tile(bt.x, bt.y) == TileDB.AIR, "炸弹能炸掉方块")
 
 	await _test_combat(main)
+	await _test_bosses(main)
 
 	# 跑几帧游戏主循环，确认不报错
 	for i in 30:
@@ -367,6 +368,110 @@ func _test_combat(main: Node2D) -> void:
 	cb.spawning_enabled = true
 
 
+func _test_bosses(main: Node2D) -> void:
+	print("== Boss ==")
+	var cb: Combat = main.combat
+	var p: Player = main.player
+	var inv: Inventory = main.inventory
+	var dt := 1.0 / 60.0
+	cb.spawning_enabled = false
+	cb.clear()
+	var natural := false
+	for layer in ["地表", "地下", "洞穴层", "深渊"]:
+		for c in EnemyDB.candidates(layer, true) + EnemyDB.candidates(layer, false):
+			if EnemyDB.is_boss(c[0]):
+				natural = true
+	check(not natural, "Boss 不会自然刷出")
+	check(ItemDB.recipes().any(func(r): return r.result == "starstone_pickaxe" and r.ingredients.has("warden_prism")), "星辉镐需要守望者棱晶（Boss 推进进度）")
+
+	# —— 泥沼巨像 ——
+	p.teleport(main.spawn_position())
+	for i in 30:
+		p.step(dt, 0.0, false, false)
+	inv.slots[9] = ItemDB.make("crystal_beacon", 1)
+	check(not main.use_consumable(9) and inv.slots[9] != null, "灵晶信标在地表用不了，也不会被消耗")
+	inv.slots[9] = ItemDB.make("mud_offering", 2)
+	check(main.use_consumable(9) and cb.boss != null and cb.boss.id == "mud_colossus", "在地表用泥沼祭品召唤出泥沼巨像")
+	check(inv.slots[9] != null and int(inv.slots[9].count) == 1, "召唤消耗 1 个祭品")
+	check(not main.use_consumable(9), "Boss 在场时不能重复召唤")
+	var b: Boss = cb.boss
+	check(b.center().distance_to(p.center()) > 12.0 * 16.0, "Boss 出现在离玩家一段距离的地方")
+	p.invuln = 9999.0
+	var saw_wave := false
+	for i in 600:
+		cb.physics_tick(dt)
+		for pr in cb.projectiles:
+			if is_instance_valid(pr) and pr.kind == "wave":
+				saw_wave = true
+	check(is_instance_valid(b) and b.hp > 0.0, "巨像 AI 运行 10 秒没有出错")
+	check(saw_wave, "巨像落地会掀起泥浪")
+	b.hp = b.max_hp * 0.45
+	cb.physics_tick(dt)
+	check(b.phase == 2, "血量低于一半进入二阶段")
+	var hearts := inv.count_of("mud_heart")
+	var sword := ItemDB.make("starstone_sword")
+	for i in 500:
+		if not is_instance_valid(b) or b.hp <= 0.0:
+			break
+		cb.deal_damage(b, sword, 0.0, Vector2.RIGHT)
+	check(b.hp <= 0.0 and cb.boss == null, "能打败泥沼巨像")
+	check(inv.count_of("mud_heart") == hearts + 1 and inv.count_of("colossus_shard") >= 6, "掉落泥王之心和巨像碎片")
+	check(inv.count_of("mud_hammer") + inv.count_of("sludge_staff") >= 1, "随机掉落一把 Boss 专属武器")
+	check(int(main.bosses.get("mud_colossus", 0)) == 1, "记录了击败泥沼巨像")
+	cb.clear()
+
+	# —— 灵晶守望者（要到洞穴层）——
+	var w: WorldData = main.world
+	var spot := Vector2i(-1, -1)
+	for dx in range(0, w.width / 2):
+		for sx in [1, -1]:
+			var x: int = w.spawn.x + dx * sx
+			for y in range(int(w.layers.cavern) + 4, int(w.layers.underworld) - 4):
+				if not w.is_solid(x, y) and not w.is_solid(x, y - 1) and w.is_solid(x, y + 1):
+					spot = Vector2i(x, y)
+					break
+			if spot.x >= 0:
+				break
+		if spot.x >= 0:
+			break
+	check(spot.x >= 0, "测试世界里找到洞穴层的落脚点")
+	p.teleport(Vector2(spot.x * 16 + 2, (spot.y + 1) * 16 - Player.H - 0.01))
+	inv.slots[9] = ItemDB.make("crystal_beacon", 2)
+	check(main.use_consumable(9) and cb.boss != null and cb.boss.id == "crystal_warden", "在洞穴层用灵晶信标召唤出灵晶守望者")
+	var wd: Boss = cb.boss
+	var saw_shard := false
+	var saw_dash := false
+	for i in 600:
+		cb.physics_tick(dt)
+		saw_dash = saw_dash or wd.state == "dash"
+		for pr in cb.projectiles:
+			if is_instance_valid(pr) and pr.kind == "shard":
+				saw_shard = true
+	check(is_instance_valid(wd) and wd.hp > 0.0, "守望者 AI 运行 10 秒没有出错")
+	check(saw_shard, "守望者会放环形晶刺（在岩石里也能放出来）")
+	check(saw_dash, "守望者会蓄力冲刺")
+	wd.hp = wd.max_hp * 0.4
+	for i in 300:
+		cb.physics_tick(dt)
+	check(wd.phase == 2, "守望者进入二阶段")
+	var prisms := inv.count_of("warden_prism")
+	for i in 800:
+		if not is_instance_valid(wd) or wd.hp <= 0.0:
+			break
+		cb.deal_damage(wd, sword, 0.0, Vector2.RIGHT)
+	check(wd.hp <= 0.0 and inv.count_of("warden_prism") >= prisms + 3 and inv.count_of("warden_eye") >= 1, "打败守望者，掉落棱晶和守望之眼")
+
+	# 玩家死了 Boss 会离开
+	check(main.use_consumable(9) and cb.boss != null, "可以再次召唤")
+	main.damage(99999, "测试")
+	check(main.dead and cb.boss == null, "玩家倒下后 Boss 离开")
+	main._respawn()
+	cb.clear()
+	p.invuln = 0.0
+	p.hp = p.max_hp
+	cb.spawning_enabled = true
+
+
 func _test_save_load(main: Node2D) -> void:
 	print("== 存档 / 读档 ==")
 	var path := "user://test_saves/smoke.sav"
@@ -407,6 +512,7 @@ func _test_save_load(main: Node2D) -> void:
 	var pick: Dictionary = main2.inventory.slots[7]
 	check(pick.affix == "星选" and int(pick.xp) == 321, "工具的词缀和熟练度恢复（%s）" % ItemDB.display_name(pick))
 	check(main2.buffs.has("采掘"), "药水增益恢复")
+	check(int(main2.bosses.get("mud_colossus", 0)) == 1 and int(main2.kills.get("mudling", 0)) >= 1, "Boss 击败记录和击杀数恢复")
 	check(main2.player.position.distance_to(pos_before) < 0.5, "玩家位置恢复")
 	check(main2.player.max_hp == 100 + 2 * 20, "生命上限按生命果重新计算（%d）" % main2.player.max_hp)
 	main2.save_path = ""
