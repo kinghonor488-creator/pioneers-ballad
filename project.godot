@@ -1,15 +1,18 @@
 ; Engine configuration file.
-; 星壤纪元 (Starsoil) —— 临时名，正式名字等你来起。
+; 拓荒者之歌 Pioneer's Ballad
 
 config_version=5
 
 [application]
 
-config/name="星壤纪元 Starsoil"
+config/name="拓荒者之歌 Pioneer's Ballad"
 config/description="一个原创的 2D 沙盒冒险游戏（开发中）。"
 run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
+; 存档文件夹固定用这个英文名（~/Library/Application Support/PioneersBallad），以后再改游戏名也不会丢存档
+config/use_custom_user_dir=true
+config/custom_user_dir_name="PioneersBallad"
 
 [display]
 

@@ -42,8 +42,8 @@ func _ready() -> void:
 	v.add_theme_constant_override("separation", 10)
 	panel.add_child(v)
 
-	v.add_child(_label("星壤纪元", 44, GOLD, true))
-	v.add_child(_label("Starsoil · 原创 2D 沙盒冒险", 15, SOFT, true))
+	v.add_child(_label("拓荒者之歌", 44, GOLD, true))
+	v.add_child(_label("Pioneer's Ballad · 原创 2D 沙盒冒险", 15, SOFT, true))
 	v.add_child(HSeparator.new())
 
 	v.add_child(_label("选择世界", 20, GOLD))
@@ -95,6 +95,9 @@ func _ready() -> void:
 	quit_btn.pressed.connect(func(): get_tree().quit())
 	buttons.add_child(quit_btn)
 
+	var moved := SaveSystem.migrate_legacy_saves()
+	if moved > 0:
+		GameSession.message = ("已经把 %d 个旧世界搬到新的存档位置。" % moved) + ("\n" + GameSession.message if GameSession.message != "" else "")
 	status_label = _label(GameSession.message, 14, Color(1, 0.6, 0.45), true)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(status_label)

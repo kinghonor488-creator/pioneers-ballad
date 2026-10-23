@@ -1,10 +1,9 @@
-# 星壤纪元 Starsoil（临时名）
+# 拓荒者之歌 Pioneer's Ballad
 
 一个用 **Godot 4** 从零编写的原创 2D 沙盒冒险游戏：挖矿、建造、探索地下世界、收集各种稀奇的道具。
 所有代码和美术都是原创的——像素图全部由代码现场生成，没有使用任何外部素材。
 
-> "星壤纪元"只是临时名字，正式名字由你来起。改名只需改 `project.godot` 里的 `config/name`
-> 和 `scripts/game/main.gd` 里的欢迎语。
+> 从一把燧石镐开始，开拓一整个世界。
 
 ## 如何运行
 
@@ -28,7 +27,9 @@ godot --path /Users/sunyubo/Desktop/泰拉瑞亚
   工具的词缀和熟练度、生命果、位置、天数和时间
 - **自动保存**：每 5 分钟一次；关闭游戏窗口时也会自动保存
 - **手动保存**：游戏中按 **Esc** 打开菜单 → 保存游戏 / 保存并回到标题界面 / 保存并退出
-- 存档位置：`~/Library/Application Support/Godot/app_userdata/星壤纪元 Starsoil/saves/`
+- 存档位置：`~/Library/Application Support/PioneersBallad/saves/`
+  （文件夹名在 `project.godot` 里固定，以后再改游戏名也不会丢存档；
+  以前用临时名"星壤纪元"时创建的世界，打开标题界面时会自动复制过来，旧文件原样保留）
 - 安全措施：先写临时文件再替换，上一份存档保留为 `.bak`；损坏或只写了一半的存档会被识别出来，
   不会让游戏崩溃（标题界面会显示"存档损坏"）
 

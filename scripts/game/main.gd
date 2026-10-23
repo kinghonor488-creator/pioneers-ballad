@@ -171,7 +171,7 @@ func _ready() -> void:
 	if loading:
 		hud.notify("欢迎回到「%s」！" % world_name, Color(1, 0.9, 0.5))
 	else:
-		hud.notify("欢迎来到星壤纪元！按 E 打开背包和制作栏，Esc 打开菜单。", Color(1, 0.9, 0.5))
+		hud.notify("欢迎来到拓荒者之歌！按 E 打开背包和制作栏，Esc 打开菜单。", Color(1, 0.9, 0.5))
 	ready_done = true
 	if save_path != "" and not loading:
 		save_game(false)  # 新世界立刻存一次，标题界面的列表里就能看到

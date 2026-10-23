@@ -1,7 +1,7 @@
 class_name SaveSystem
 extends RefCounted
 ## 存档读写。每个世界一个 .sav 文件，放在 user://saves/
-## （macOS 上是 ~/Library/Application Support/Godot/app_userdata/星壤纪元 Starsoil/saves/）。
+## （macOS 上是 ~/Library/Application Support/PioneersBallad/saves/，文件夹名在 project.godot 里固定，不随游戏名变化）。
 ##
 ## 文件格式：
 ##   "STSV"（4 字节标记） + 版本号（4 字节）
@@ -17,6 +17,8 @@ const SAVE_DIR := "user://saves"
 const EXT := ".sav"
 const MAGIC := "STSV"
 const VERSION := 2
+## 以前用临时名"星壤纪元"时的存档位置（相对于系统的应用数据目录），启动时会把那里的存档复制过来
+const LEGACY_DIRS := ["Godot/app_userdata/星壤纪元 Starsoil/saves"]
 
 
 static func new_save_path() -> String:
@@ -135,6 +137,28 @@ static func _read_block(f: FileAccess) -> PackedByteArray:
 
 
 ## 所有存档，最近保存的排在前面。损坏的存档 header 为空字典。
+## 把旧位置的存档复制到现在的存档文件夹（同名的不覆盖，旧文件原样保留）。返回复制了几个世界。
+static func migrate_legacy_saves(dirs: Array = []) -> int:
+	if dirs.is_empty():
+		for rel in LEGACY_DIRS:
+			dirs.append(OS.get_data_dir().path_join(rel))
+	DirAccess.make_dir_recursive_absolute(SAVE_DIR)
+	var copied := 0
+	for old_dir in dirs:
+		var dir := DirAccess.open(old_dir)
+		if dir == null:
+			continue
+		for f in dir.get_files():
+			if not (f.ends_with(EXT) or f.ends_with(EXT + ".bak")):
+				continue
+			var dst := SAVE_DIR.path_join(f)
+			if FileAccess.file_exists(dst):
+				continue
+			if DirAccess.copy_absolute(String(old_dir).path_join(f), ProjectSettings.globalize_path(dst)) == OK and f.ends_with(EXT):
+				copied += 1
+	return copied
+
+
 static func list_saves() -> Array:
 	var out := []
 	var dir := DirAccess.open(SAVE_DIR)

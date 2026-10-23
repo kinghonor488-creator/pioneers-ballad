@@ -903,6 +903,20 @@ func _test_save_load(main: Node2D) -> void:
 	await process_frame
 	get_auto_accept_quit_reset()
 
+	# 改名前的旧存档会被搬到新的存档文件夹
+	var legacy := ProjectSettings.globalize_path("user://test_legacy")
+	DirAccess.make_dir_recursive_absolute(legacy)
+	var legacy_name := "world_legacy_test.sav"
+	DirAccess.copy_absolute(ProjectSettings.globalize_path(path), legacy.path_join(legacy_name))
+	SaveSystem.delete_save(SaveSystem.SAVE_DIR.path_join(legacy_name))
+	check(SaveSystem.migrate_legacy_saves([legacy]) == 1, "旧位置的存档会被复制过来")
+	var migrated := SaveSystem.SAVE_DIR.path_join(legacy_name)
+	check(String(SaveSystem.read_header(migrated).get("name", "")) == "测试世界", "复制过来的存档能正常读取")
+	check(SaveSystem.migrate_legacy_saves([legacy]) == 0 and FileAccess.file_exists(legacy.path_join(legacy_name)), "不会重复复制，旧文件原样保留")
+	SaveSystem.delete_save(migrated)
+	DirAccess.remove_absolute(legacy.path_join(legacy_name))
+	DirAccess.remove_absolute(legacy)
+
 	# 损坏的存档不能把游戏弄崩
 	var bad := "user://test_saves/broken.sav"
 	var f := FileAccess.open(bad, FileAccess.WRITE)
@@ -926,6 +940,8 @@ func _test_save_load(main: Node2D) -> void:
 	root.add_child(title)
 	await process_frame
 	check(title.list_box != null, "标题界面能加载")
+	check(ProjectSettings.get_setting("application/config/name") == "拓荒者之歌 Pioneer's Ballad", "游戏名是「拓荒者之歌」")
+	check(OS.get_user_data_dir().ends_with("PioneersBallad"), "存档文件夹固定为 PioneersBallad")
 	check(title.seed_from_text("") == 0 and title.seed_from_text("123") == 123 and title.seed_from_text("hello") > 0, "种子文字转换正确")
 	title.queue_free()
 	await process_frame
