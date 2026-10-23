@@ -6,6 +6,9 @@ extends RefCounted
 ##   flyer   慢慢飘向玩家（phase = true 时能穿墙）
 ##   bat     飞行，路线忽左忽右，撞墙会弹开
 ##   shooter 和玩家保持距离，定时发射火球
+##   turret  长在地上不动，玩家靠近就吐种子（毒刺花）
+## spawn.biomes：只在这些生物群系出现（不写 = 哪里都可以，但在雪原/丛林/水晶洞里出现得少一些）
+## inflict：碰到玩家时给玩家加的负面效果 [名字, 秒数, 几率]
 ## spawn.layers 用的是 WorldData.layer_name() 返回的层名；time 是 "any" / "day" / "night"。
 ## drops: [道具 id, 最少, 最多, 几率]
 ## Boss（boss = true）不会自然刷出，只能用召唤道具叫出来；choice 里的武器会随机掉一把。
@@ -48,6 +51,55 @@ const DEFS := {
 		"drops": [["ember_core", 1, 1, 0.35]],
 		"spawn": {"layers": ["深渊"], "time": "any", "weight": 10},
 	},
+	# ---------------- 雪原 ----------------
+	"frost_wolf": {
+		"name": "霜狼", "ai": "walker", "art": "wolf", "color": Color(0.82, 0.88, 0.95),
+		"hp": 50, "damage": 16, "defense": 4, "size": Vector2(20, 12), "speed": 105.0, "kb_resist": 0.3,
+		"inflict": ["冻伤", 3.0, 0.35],
+		"drops": [["wolf_pelt", 1, 2, 0.7]],
+		"spawn": {"layers": ["地表"], "biomes": ["snow"], "time": "any", "weight": 10},
+	},
+	"ice_wisp": {
+		"name": "冰灵", "ai": "flyer", "art": "wisp", "color": Color(0.6, 0.85, 1.0), "phase": true, "glow": 3.0,
+		"hp": 40, "damage": 18, "defense": 4, "size": Vector2(12, 12), "speed": 80.0, "kb_resist": 0.3,
+		"inflict": ["冻伤", 4.0, 0.6],
+		"drops": [["frost_shard", 1, 2, 0.75]],
+		"spawn": {"layers": ["地表", "地下", "洞穴层"], "biomes": ["snow"], "time": "any", "weight": 8},
+	},
+	# ---------------- 丛林 ----------------
+	"hornet": {
+		"name": "丛林黄蜂", "ai": "bat", "art": "hornet", "color": Color(0.95, 0.75, 0.15),
+		"hp": 35, "damage": 16, "defense": 3, "size": Vector2(14, 10), "speed": 135.0,
+		"inflict": ["中毒", 5.0, 0.5],
+		"drops": [["stinger", 1, 1, 0.6]],
+		"spawn": {"layers": ["地表", "地下", "洞穴层"], "biomes": ["jungle"], "time": "any", "weight": 10},
+	},
+	"snapper": {
+		"name": "毒刺花", "ai": "turret", "art": "plant", "color": Color(0.85, 0.25, 0.45),
+		"hp": 60, "damage": 14, "defense": 6, "size": Vector2(16, 20), "speed": 0.0, "kb_resist": 1.0,
+		"shoot": {"damage": 14, "speed": 210.0, "cooldown": 2.2, "kind": "seed", "inflict": ["中毒", 4.0, 0.6]},
+		"drops": [["jungle_spore", 1, 3, 1.0]],
+		"spawn": {"layers": ["地表", "地下", "洞穴层"], "biomes": ["jungle"], "time": "any", "weight": 6},
+	},
+	"bog_frog": {
+		"name": "沼泽蛙", "ai": "hopper", "art": "frog", "color": Color(0.3, 0.6, 0.3),
+		"hp": 45, "damage": 15, "defense": 4, "size": Vector2(14, 10), "speed": 120.0, "jump": 380.0,
+		"drops": [["jungle_spore", 1, 2, 0.5]],
+		"spawn": {"layers": ["地下", "洞穴层"], "biomes": ["jungle"], "time": "any", "weight": 8},
+	},
+	# ---------------- 水晶洞 ----------------
+	"crystal_urchin": {
+		"name": "晶刺刺猬", "ai": "walker", "art": "urchin", "color": Color(0.7, 0.6, 1.0), "glow": 2.5,
+		"hp": 80, "damage": 24, "defense": 14, "size": Vector2(16, 12), "speed": 55.0, "kb_resist": 0.7,
+		"drops": [["prism_ore", 1, 3, 0.6], ["crystal_shard", 1, 2, 0.6]],
+		"spawn": {"layers": ["洞穴层"], "biomes": ["crystal"], "time": "any", "weight": 10},
+	},
+	"crystal_phantom": {
+		"name": "水晶幽影", "ai": "flyer", "art": "phantom", "color": Color(0.85, 0.7, 1.0), "phase": true, "glow": 3.5,
+		"hp": 65, "damage": 24, "defense": 8, "size": Vector2(14, 18), "speed": 85.0, "kb_resist": 0.4,
+		"drops": [["crystal_shard", 2, 4, 0.8]],
+		"spawn": {"layers": ["洞穴层"], "biomes": ["crystal"], "time": "any", "weight": 7},
+	},
 	# ---------------- Boss ----------------
 	"mud_colossus": {
 		"name": "泥沼巨像", "boss": true, "ai": "boss_mud", "art": "colossus", "color": Color(0.45, 0.33, 0.2),
@@ -85,16 +137,23 @@ static func is_boss(id: String) -> bool:
 	return bool(get_def(id).get("boss", false))
 
 
-## 某一层、某个时间能刷出来的敌人：[[id, 权重], ...]
-static func candidates(layer: String, night: bool) -> Array:
+## 某一层、某个时间、某个生物群系能刷出来的敌人：[[id, 权重], ...]
+static func candidates(layer: String, night: bool, biome: String = "forest") -> Array:
 	var out := []
+	var special := biome in ["snow", "jungle", "crystal"]
 	for id in DEFS:
 		var sp: Dictionary = DEFS[id].spawn
 		if not layer in sp.layers:
 			continue
+		var biomes: Array = sp.get("biomes", [])
+		if not biomes.is_empty() and not biome in biomes:
+			continue
 		var t := String(sp.get("time", "any"))
 		if t == "any" or (t == "night" and night) or (t == "day" and not night):
-			out.append([id, float(sp.weight)])
+			var wgt := float(sp.weight)
+			if biomes.is_empty() and special:
+				wgt *= 0.25   # 特殊生物群系里，普通怪少一些
+			out.append([id, wgt])
 	return out
 
 

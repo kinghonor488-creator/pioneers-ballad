@@ -29,6 +29,7 @@ var max_mana := 40
 var attack_anim := 0.0     ## >0 时正在挥动武器（攻击时面朝鼠标）
 var light_strength := 0.4  ## 玩家身上的光（饰品、萤光药水会加强）
 var in_liquid := 0         ## 身体泡在什么液体里（WorldData.LIQ_*）
+var ice_grip := false      ## 冰爪鞋：在冰上不打滑
 
 var _coyote := 0.0
 var _jump_buffer := 0.0
@@ -54,7 +55,10 @@ func step(dt: float, dir: float, jump_pressed: bool, jump_held: bool) -> void:
 		speed_k = 0.6
 	elif in_liquid == WorldData.LIQ_LAVA:
 		speed_k = 0.4
-	velocity.x = move_toward(velocity.x, dir * RUN_SPEED * move_mult * speed_k, (GROUND_ACCEL if on_ground else AIR_ACCEL) * dt)
+	var accel := GROUND_ACCEL if on_ground else AIR_ACCEL
+	if on_ground and not ice_grip and _standing_on_ice():
+		accel *= 0.12   # 冰面很滑：起步慢、停不下来
+	velocity.x = move_toward(velocity.x, dir * RUN_SPEED * move_mult * speed_k, accel * dt)
 	if dir != 0.0 and attack_anim <= 0.0:
 		facing = 1 if dir > 0.0 else -1
 	_coyote = COYOTE if on_ground else maxf(0.0, _coyote - dt)
@@ -97,6 +101,14 @@ func step(dt: float, dir: float, jump_pressed: bool, jump_held: bool) -> void:
 	invuln = maxf(0.0, invuln - dt)
 	attack_anim = maxf(0.0, attack_anim - dt)
 	queue_redraw()
+
+
+func _standing_on_ice() -> bool:
+	var fy := floori((position.y + H + 1.0) / TS)
+	for fx in [floori((position.x + 1.0) / TS), floori((position.x + W - 1.0) / TS)]:
+		if TileDB.prop(world.get_tile(fx, fy), "slippery", false):
+			return true
+	return false
 
 
 func teleport(px: Vector2) -> void:

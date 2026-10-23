@@ -16,6 +16,11 @@ const AUTOSAVE_INTERVAL := 300.0  ## 每 5 分钟自动保存一次
 const BASE_BREATH := 10.0         ## 在水下能憋气多少秒
 const LIQUID_TICK := 0.05         ## 液体每秒流动 20 步
 const LAVA_DAMAGE := 30
+## 负面效果：effects 和增益一样合并进属性；immune 是能免疫它的属性
+const DEBUFFS := {
+	"中毒": {"effects": {"dot": 3.0}, "immune": "immune_poison", "color": Color(0.55, 0.95, 0.35)},
+	"冻伤": {"effects": {"move": -0.35, "jump": -0.25}, "immune": "immune_frost", "color": Color(0.6, 0.85, 1.0)},
+}
 const TITLE_SCENE := "res://scenes/title.tscn"
 
 @export var world_width := 4200
@@ -36,6 +41,7 @@ var liquids: LiquidSim
 var breath := BASE_BREATH
 var _liquid_timer := 0.0
 var _drown_timer := 1.0
+var _dot_acc := 0.0
 var rng := RandomNumberGenerator.new()
 var ready_done := false
 var world_name := "未命名世界"
@@ -289,6 +295,19 @@ func _regen(delta: float) -> void:
 	_regen_delay = maxf(0.0, _regen_delay - delta)
 	if _regen_delay <= 0.0 and player.hp < player.max_hp:
 		player.hp = minf(player.max_hp, player.hp + 2.0 * delta)
+	# 中毒掉血、再生药水回血
+	var regen := float(stats.get("regen", 0.0))
+	if regen > 0.0:
+		player.hp = minf(player.max_hp, player.hp + regen * delta)
+	var dot := float(stats.get("dot", 0.0))
+	if dot > 0.0:
+		_dot_acc += dot * delta
+		if _dot_acc >= 1.0:
+			var n := int(_dot_acc)
+			_dot_acc -= n
+			player.hp -= n
+			player.hurt_flash = 0.1
+			_check_death()
 	_mana_delay = maxf(0.0, _mana_delay - delta)
 	if _mana_delay <= 0.0:
 		player.mana = minf(player.max_mana, player.mana + 12.0 * delta)
@@ -300,6 +319,25 @@ func mana_used() -> void:
 
 # ---------------------------------------------------------------- 增益与属性
 
+## 给玩家加一个负面效果（中毒、冻伤）。有对应免疫就不加。
+func add_debuff(debuff_name: String, time: float) -> void:
+	var d: Dictionary = DEBUFFS.get(debuff_name, {})
+	if d.is_empty() or bool(stats.get(String(d.immune), false)):
+		return
+	if not buffs.has(debuff_name):
+		hud.notify("你%s了！" % debuff_name, d.color)
+	var left := float(buffs[debuff_name].time) if buffs.has(debuff_name) else 0.0
+	buffs[debuff_name] = {"effects": d.effects, "time": maxf(left, time), "debuff": true}
+	recalc_stats()
+
+
+func clear_debuffs() -> void:
+	for k in buffs.keys():
+		if buffs[k].get("debuff", false):
+			buffs.erase(k)
+	recalc_stats()
+
+
 func _tick_buffs(delta: float) -> void:
 	for k in buffs.keys():
 		buffs[k].time -= delta
@@ -310,7 +348,8 @@ func _tick_buffs(delta: float) -> void:
 
 func recalc_stats() -> void:
 	var s := {"move": 0.0, "jump": 0.0, "mine": 0.0, "reach": 0.0, "light": 0.0, "nofall": false, "maxhp": 0.0,
-		"defense": 0.0, "damage": 0.0, "crit": 0.0, "mana": 0.0, "speed": 0.0, "breath": 0.0, "lavares": 0.0}
+		"defense": 0.0, "damage": 0.0, "crit": 0.0, "mana": 0.0, "speed": 0.0, "breath": 0.0, "lavares": 0.0,
+		"dot": 0.0, "regen": 0.0, "immune_poison": false, "immune_frost": false, "icegrip": false}
 	for a in inventory.accessories:
 		if a != null:
 			_merge_effects(s, ItemDB.get_def(a.id).get("effects", {}))
@@ -323,6 +362,12 @@ func recalc_stats() -> void:
 	player.max_hp = 100 + int(s.maxhp) + life_fruits * 20
 	player.hp = minf(player.hp, player.max_hp)
 	player.max_mana = 40 + int(s.mana)
+	player.ice_grip = bool(s.icegrip)
+	player.move_mult = maxf(0.3, player.move_mult)
+	# 有了免疫，身上已有的负面效果马上消失
+	for k in DEBUFFS:
+		if buffs.has(k) and bool(s.get(String(DEBUFFS[k].immune), false)):
+			buffs.erase(k)
 	player.mana = minf(player.mana, player.max_mana)
 
 
@@ -428,7 +473,7 @@ func break_tile(t: Vector2i, item: Variant = null) -> bool:
 	elif id == TileDB.RELIC_CHEST:
 		world.set_tile(t.x, t.y, TileDB.AIR)
 		var depth01 := clampf(float(t.y - world.layers.rock) / float(world.height - world.layers.rock), 0.0, 1.0)
-		gained = ItemDB.roll_chest_loot(rng, depth01)
+		gained = ItemDB.roll_chest_loot(rng, depth01, world.biome_at(t.x, t.y))
 		hud.notify("打开了遗迹宝匣！", RARITY_GOLD)
 	else:
 		world.set_tile(t.x, t.y, TileDB.AIR)
@@ -491,6 +536,7 @@ func _check_supports(t: Vector2i) -> void:
 			var drop := String(TileDB.prop(id, "drop", ""))
 			if drop != "":
 				give(ItemDB.make(drop, 1))
+			_check_supports(q)   # 一整串藤蔓会一起掉下来
 
 
 func has_support(t: Vector2i, tile_id: int) -> bool:
@@ -498,6 +544,8 @@ func has_support(t: Vector2i, tile_id: int) -> bool:
 	match String(TileDB.prop(tile_id, "support", "")):
 		"floor":
 			return below_solid
+		"ceiling":
+			return world.get_tile(t.x, t.y - 1) != TileDB.AIR
 		"any":
 			return below_solid or world.is_solid(t.x - 1, t.y) or world.is_solid(t.x + 1, t.y) \
 				or world.is_solid(t.x, t.y - 1) or world.get_wall(t.x, t.y) != TileDB.WALL_NONE
@@ -582,6 +630,15 @@ func use_consumable(slot: int) -> bool:
 	elif u.has("teleport"):
 		player.teleport(spawn_position())
 		hud.notify("一阵光芒闪过，你回到了出生点。", Color(0.8, 0.7, 1))
+	elif u.has("cure"):
+		var had := false
+		for k in buffs:
+			had = had or bool(buffs[k].get("debuff", false))
+		if not had:
+			hud.hint("你现在没有中毒或冻伤。")
+			return false
+		clear_debuffs()
+		hud.notify("身上的负面效果消失了。", Color(0.6, 1, 0.7))
 	elif u.has("summon"):
 		var err: String = combat.summon_boss(String(u.summon))
 		if err != "":
@@ -733,12 +790,13 @@ func use_bucket(t: Vector2i, slot: int) -> bool:
 
 ## from：伤害来源的位置。有来源的伤害（怪物、弹幕）会被防御减免、触发无敌时间并击退玩家；
 ## 摔伤、爆炸这类没有来源的伤害不受防御影响。
-func damage(amount: int, reason: String, from: Vector2 = Vector2.INF) -> void:
+## 返回这次伤害是否真的生效（无敌时间里会被挡掉）
+func damage(amount: int, reason: String, from: Vector2 = Vector2.INF) -> bool:
 	if dead or amount <= 0:
-		return
+		return false
 	if from != Vector2.INF:
 		if player.invuln > 0.0:
-			return
+			return false
 		amount = maxi(1, amount - int(float(stats.get("defense", 0.0)) * 0.5))
 		player.invuln = 0.6
 		var away := signf(player.center().x - from.x)
@@ -747,7 +805,12 @@ func damage(amount: int, reason: String, from: Vector2 = Vector2.INF) -> void:
 	player.hurt_flash = 0.25
 	_regen_delay = 6.0
 	hud.notify("%s：-%d" % [reason, amount], Color(1, 0.45, 0.4))
-	if player.hp <= 0:
+	_check_death()
+	return true
+
+
+func _check_death() -> void:
+	if player.hp <= 0 and not dead:
 		dead = true
 		player.hp = 0
 		player.visible = false
@@ -761,6 +824,7 @@ func _respawn() -> void:
 	player.visible = true
 	player.hp = player.max_hp
 	player.teleport(spawn_position())
+	clear_debuffs()
 
 
 # ---------------------------------------------------------------- 合成
@@ -847,6 +911,7 @@ func make_save_header() -> Dictionary:
 		"spawn": world.spawn,
 		"layers": world.layers.duplicate(),
 		"surface": world.surface,
+		"biomes": world.biome_cols,
 		"saved_at": int(Time.get_unix_time_from_system()),
 		"play_time": play_time,
 		"day": day,

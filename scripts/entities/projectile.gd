@@ -13,6 +13,7 @@ var weapon: Variant = null  ## 玩家弹幕：发射它的武器（算伤害、�
 var extra_damage := 0.0     ## 箭矢附加伤害
 var pierce := 1
 var phase := false          ## true = 穿过方块（守望者的环形晶刺）
+var inflict: Array = []     ## 敌方弹幕命中玩家时附带的负面效果
 var color := Color.WHITE
 var life := 3.0
 var dead := false
@@ -70,7 +71,7 @@ func _check_hits() -> bool:
 	if hostile:
 		var p: Player = combat.player()
 		if p.visible and p.rect().grow(2.0).has_point(position):
-			combat.hurt_player(damage, position, String({"wave": "泥浪", "shard": "晶刺"}.get(kind, "火球")))
+			combat.hurt_player(damage, position, String({"wave": "泥浪", "shard": "晶刺", "seed": "毒种"}.get(kind, "火球")), inflict)
 			_die()
 			return true
 		return false
@@ -111,6 +112,9 @@ func _draw() -> void:
 		"shard":
 			draw_colored_polygon(PackedVector2Array([Vector2(7, 0), Vector2(0, -2.5), Vector2(-6, 0), Vector2(0, 2.5)]), color)
 			draw_line(Vector2(-5, 0), Vector2(6, 0), Color(1, 1, 1, 0.8), 1.0)
+		"seed":
+			draw_circle(Vector2.ZERO, 3.0, Color(0.35, 0.6, 0.2))
+			draw_circle(Vector2(1, -1), 1.2, Color(0.7, 0.95, 0.4))
 		"fireball":
 			draw_circle(Vector2(-5, 0), 3.0, Color(1, 0.4, 0.1, 0.4))
 			draw_circle(Vector2.ZERO, 4.5, Color(1, 0.45, 0.12))

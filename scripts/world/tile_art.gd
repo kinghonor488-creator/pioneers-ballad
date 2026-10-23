@@ -266,6 +266,55 @@ static func paint_tile(img: Image, id: int, o: Vector2i, rng: RandomNumberGenera
 					x = clampi(x + rng.randi_range(-1, 1), 0, TS - 1)
 				if rng.randf() < 0.6:
 					_px(img, o, x, y, c.darkened(0.4))
+		"snow":
+			_noise_fill(img, o, c, rng, 0.03)
+			_speckle(img, o, Color(0.78, 0.85, 0.95), rng, 8)
+			_speckle(img, o, Color.WHITE, rng, 6)
+		"ice":
+			_noise_fill(img, o, c, rng, 0.03)
+			for i in 2:
+				var sx := rng.randi_range(0, 10)
+				_line(img, o, Vector2i(sx, 14), Vector2i(sx + 5, 9), Color(0.9, 0.97, 1.0, 0.9))
+			_speckle(img, o, c.darkened(0.15), rng, 5)
+		"boreal":
+			_noise_fill(img, o, c, rng, 0.05)
+			_speckle(img, o, c.darkened(0.35), rng, 10)
+			_speckle(img, o, Color(0.92, 0.96, 1.0), rng, 7)   # 积雪
+		"jgrass":
+			_noise_fill(img, o, c, rng, 0.04)
+			_speckle(img, o, c.darkened(0.3), rng, 6)
+			var jg := Color(0.2, 0.62, 0.22)
+			for x in TS:
+				var h := 3 + rng.randi() % 4
+				for y in h:
+					_px(img, o, x, y, _jitter(jg if y < h - 1 else jg.darkened(0.3), rng, 0.05))
+		"vine":
+			var x := 7 + rng.randi_range(-1, 1)
+			for y in TS:
+				if rng.randf() < 0.3:
+					x = clampi(x + rng.randi_range(-1, 1), 5, 10)
+				_px(img, o, x, y, c)
+				_px(img, o, x + 1, y, c.darkened(0.3))
+				if y % 5 == 2:
+					_px(img, o, x - 1, y, c.lightened(0.2))
+					_px(img, o, x + 2, y + 1, c.lightened(0.1))
+		"flower":
+			_rect(img, o, 7, 9, 8, 15, Color(0.25, 0.55, 0.2))
+			_px(img, o, 6, 12, Color(0.3, 0.65, 0.25))
+			_px(img, o, 9, 11, Color(0.3, 0.65, 0.25))
+			for p in [Vector2i(7, 5), Vector2i(5, 6), Vector2i(10, 6), Vector2i(6, 8), Vector2i(9, 8)]:
+				_disc(img, o, Vector2(p) + Vector2(0.5, 0.5), 1.6, c)
+			_px(img, o, 7, 7, Color(1, 1, 0.7))
+			_px(img, o, 8, 7, Color(1, 1, 0.7))
+		"crystalblock":
+			_noise_fill(img, o, c.darkened(0.35), rng, 0.04)
+			for i in 3:
+				var cx := rng.randi_range(2, 12)
+				var cy := rng.randi_range(2, 12)
+				var col: Color = [Color(0.55, 0.85, 1.0), Color(0.85, 0.6, 1.0), Color(0.6, 1.0, 0.9)][rng.randi() % 3]
+				_line(img, o, Vector2i(cx - 2, cy + 2), Vector2i(cx + 2, cy - 2), col)
+				_line(img, o, Vector2i(cx - 1, cy + 2), Vector2i(cx + 2, cy - 1), col.darkened(0.2))
+				_px(img, o, cx + 1, cy - 1, Color.WHITE)
 		"obsidian":
 			_noise_fill(img, o, c, rng, 0.03)
 			for i in 3:
@@ -486,6 +535,33 @@ static func paint_icon(img: Image, shape: String, c: Color) -> void:
 			_disc(img, o, Vector2(11, 8), 2.0, c)
 			_px(img, o, 4, 7, Color.WHITE)
 			_px(img, o, 10, 7, Color.WHITE)
+		"pelt":
+			for y in range(3, 14):
+				var half := 6 - absi(y - 8) / 2
+				for x in range(8 - half, 8 + half):
+					_px(img, o, x, y, c if (x + y) % 3 != 0 else c.darkened(0.15))
+			_rect(img, o, 2, 3, 3, 5, c)
+			_rect(img, o, 12, 3, 13, 5, c)
+			_rect(img, o, 6, 13, 9, 15, c.darkened(0.2))
+		"stinger":
+			_line(img, o, Vector2i(3, 13), Vector2i(12, 3), Color(0.25, 0.2, 0.1))
+			_line(img, o, Vector2i(4, 13), Vector2i(12, 4), c)
+			_px(img, o, 13, 2, Color(0.9, 0.95, 0.6))
+			_rect(img, o, 2, 12, 4, 14, Color(0.95, 0.8, 0.2))
+		"scarf":
+			_rect(img, o, 2, 4, 13, 7, c)
+			_rect(img, o, 2, 4, 13, 4, c.lightened(0.3))
+			_rect(img, o, 9, 7, 12, 14, c)
+			_rect(img, o, 9, 13, 12, 14, c.lightened(0.2))
+			for x in range(2, 14, 3):
+				_px(img, o, x, 6, c.darkened(0.3))
+		"lens":
+			for y in range(3, 14):
+				var half := 6 - absi(y - 8)
+				for x in range(8 - half, 8 + half):
+					var k := float(x - 2) / 12.0
+					_px(img, o, x, y, Color.from_hsv(k * 0.8, 0.5, 1.0))
+			_line(img, o, Vector2i(5, 6), Vector2i(7, 4), Color.WHITE)
 		"bucket":
 			var metal := Color(0.7, 0.72, 0.78)
 			for y in range(5, 15):

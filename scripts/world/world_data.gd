@@ -9,6 +9,10 @@ signal tile_changed(x: int, y: int)
 const LIQ_MAX := 8
 enum { LIQ_NONE, LIQ_WATER, LIQ_LAVA }
 
+## 生物群系：每一列一个（地表的种类），雪原和丛林一直延伸到深渊上方；水晶洞按背景墙判断
+enum { B_FOREST, B_DESERT, B_SNOW, B_JUNGLE }
+const BIOME_NAMES := {"forest": "森林", "desert": "沙漠", "snow": "雪原", "jungle": "丛林", "crystal": "水晶洞", "underworld": "深渊"}
+
 var width := 0
 var height := 0
 var seed_value := 0
@@ -17,6 +21,7 @@ var walls := PackedByteArray()
 var liquid := PackedByteArray()
 var liquid_dirty: Array = []        ## 液体变了的格子下标，渲染器每帧取走
 var surface := PackedInt32Array()  ## 每一列生成时的地表高度
+var biome_cols := PackedByteArray()  ## 每一列的生物群系（B_*）
 var sky_y := PackedInt32Array()    ## 每一列从上往下第一个实心方块的 y（它上面都能被天光直射）
 var spawn := Vector2i.ZERO          ## 出生点（脚下方块的上方一格）
 var layers := {}                    ## "surface"/"rock"/"cavern"/"underworld" -> 该层开始的 y
@@ -126,6 +131,23 @@ func is_solid(x: int, y: int) -> bool:
 
 func surface_at(x: int) -> int:
 	return surface[clampi(x, 0, width - 1)]
+
+
+## 某个位置的生物群系："forest" / "desert" / "snow" / "jungle" / "crystal" / "underworld"
+func biome_at(x: int, y: int) -> String:
+	if get_wall(x, y) == TileDB.WALL_CRYSTAL:
+		return "crystal"
+	if y >= int(layers.get("underworld", height)):
+		return "underworld"
+	var b := int(biome_cols[clampi(x, 0, width - 1)]) if biome_cols.size() == width else B_FOREST
+	match b:
+		B_SNOW:
+			return "snow"
+		B_JUNGLE:
+			return "jungle"
+		B_DESERT:
+			return "desert" if y < int(layers.get("rock", height)) else "forest"
+	return "forest"
 
 
 ## 当前位置属于哪一层

@@ -34,7 +34,7 @@ const EFFECT_NAMES := {
 	"light": "照明", "nofall": "免疫摔落伤害", "maxhp": "最大生命", "luck": "双倍掉落几率",
 	"power": "挖掘力", "defense": "防御", "damage": "伤害", "crit": "暴击率",
 	"mana": "法力上限", "speed": "攻击速度", "knockback": "击退",
-	"breath": "水下呼吸时间", "lavares": "熔岩伤害减免",
+	"breath": "水下呼吸时间", "lavares": "熔岩伤害减免", "regen": "生命恢复",
 }
 
 ## 熟练度：达到这些经验值就升级（Lv0 ~ Lv5）
@@ -282,6 +282,14 @@ static func effects_lines(effects: Dictionary) -> Array:
 				out.append("可以在水下自由呼吸" if float(v) >= 50.0 else "水下呼吸时间 +%d%%" % roundi(float(v) * 100.0))
 			"lavares":
 				out.append("熔岩伤害 -%d%%" % roundi(float(v) * 100.0))
+			"regen":
+				out.append("每秒恢复 %.1f 点生命" % float(v))
+			"immune_poison":
+				out.append("免疫中毒")
+			"immune_frost":
+				out.append("免疫冻伤")
+			"icegrip":
+				out.append("在冰面上不打滑")
 			_:
 				out.append("%s +%d%%" % [EFFECT_NAMES.get(k, k), roundi(float(v) * 100.0)])
 	return out
@@ -317,6 +325,8 @@ static func tooltip(inst: Variant) -> Array:
 			lines.append(["需要箭矢（放在背包里即可）", blue])
 		elif w.type == "staff":
 			lines.append(["每次消耗 %d 点法力" % int(w.mana), blue])
+		if float(w.get("poison", 0.0)) > 0.0:
+			lines.append(["命中让敌人中毒 %d 秒" % int(w.poison), Color(0.55, 0.95, 0.35)])
 	if has_affix_slot(inst):
 		var affix := String(inst.get("affix", ""))
 		if affix != "":
@@ -347,6 +357,8 @@ static func tooltip(inst: Variant) -> Array:
 			lines.append(["获得「%s」效果 %d 秒：" % [u.buff, int(u.time)], good])
 			for t in effects_lines(u.effects):
 				lines.append(["  " + t, blue])
+		if u.has("cure"):
+			lines.append(["解除中毒和冻伤", good])
 		if u.has("teleport"):
 			lines.append(["立刻传送回出生点", good])
 		if u.has("summon"):
@@ -368,9 +380,18 @@ static func tooltip(inst: Variant) -> Array:
 # ---------------------------------------------------------------- 遗迹宝匣掉落
 
 ## depth01：0 = 刚到地下，1 = 世界底部
-static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float) -> Array:
+## biome：宝匣所在的生物群系，雪原/丛林/水晶洞的宝匣有一半几率开出当地特产
+static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float, biome: String = "") -> Array:
 	var out := []
-	if rng.randf() < 0.55 + 0.3 * depth01:
+	var local := {
+		"snow": [["ice_cleats", 5], ["fur_scarf", 5], ["frost_staff", 2]],
+		"jungle": [["bitterroot_charm", 5], ["venom_dagger", 4], ["regen_potion", 3]],
+		"crystal": [["prism_lens", 5], ["prism_repeater", 2], ["crystal_arrow", 3]],
+	}
+	if local.has(biome) and rng.randf() < 0.5:
+		var lid := String(weighted_pick(local[biome], rng))
+		out.append(make(lid, 25 if lid == "crystal_arrow" else 1, rng))
+	elif rng.randf() < 0.55 + 0.3 * depth01:
 		var pool := [
 			["feather_charm", 10], ["gale_boots", 10], ["spring_shoes", 10],
 			["glowstone_necklace", 9], ["miner_gloves", 7], ["reach_bracer", 6],
@@ -519,6 +540,29 @@ static func _build_weapons() -> void:
 	_add_weapon("sludge_staff", "淤泥法杖", 3, "staff", Color(0.55, 0.42, 0.25), {"type": "staff", "damage": 18, "speed": 2.2, "knockback": 3.0, "mana": 6, "shot_speed": 300.0, "pierce": 2})
 	_add_weapon("prism_staff", "棱晶法杖", 4, "staff", Color(0.85, 0.55, 1.0), {"type": "staff", "damage": 26, "speed": 2.4, "knockback": 3.0, "mana": 8, "shot_speed": 420.0, "pierce": 5}, "一道光能贯穿一排敌人。")
 	_add_weapon("prism_crossbow", "棱光弩", 4, "bow", Color(0.85, 0.55, 1.0), {"type": "bow", "damage": 17, "speed": 3.2, "knockback": 2.0, "shot_speed": 620.0}, "连射如雨。")
+	# 生物群系：雪原
+	_add("snow_block", "雪块", "block", 0, {"place": TileDB.SNOW})
+	_add("ice_block", "冰块", "block", 0, {"place": TileDB.ICE, "desc": "很滑。"})
+	_add("wolf_pelt", "霜狼毛皮", "material", 1, {"icon": "pelt", "color": Color(0.85, 0.9, 0.96), "desc": "又厚又暖。"})
+	_add("frost_shard", "霜晶", "material", 1, {"icon": "shard", "color": Color(0.6, 0.85, 1.0), "desc": "冰灵消散后留下的寒冷结晶。"})
+	_add("fur_scarf", "毛皮围巾", "accessory", 2, {"icon": "scarf", "color": Color(0.85, 0.82, 0.75), "effects": {"immune_frost": true, "defense": 2}})
+	_add("ice_cleats", "冰爪鞋", "accessory", 2, {"icon": "boots", "color": Color(0.6, 0.8, 0.95), "effects": {"icegrip": true, "move": 0.1}})
+	_add_weapon("frost_staff", "冰霜法杖", 2, "staff", Color(0.6, 0.85, 1.0), {"type": "staff", "damage": 20, "speed": 2.4, "knockback": 2.5, "mana": 6, "shot_speed": 340.0, "pierce": 3})
+	# 生物群系：丛林
+	_add("mud_block", "泥浆块", "block", 0, {"place": TileDB.MUD})
+	_add("jungle_spore", "丛林孢子", "material", 1, {"icon": "dust", "color": Color(0.6, 1.0, 0.4), "desc": "微微发光的孢子。"})
+	_add("stinger", "黄蜂毒刺", "material", 1, {"icon": "stinger", "color": Color(0.95, 0.8, 0.25)})
+	_add("bitterroot_charm", "苦根护符", "accessory", 2, {"icon": "amulet", "color": Color(0.5, 0.85, 0.3), "effects": {"immune_poison": true, "regen": 0.5}})
+	_add_weapon("venom_dagger", "毒刺短剑", 2, "dagger", Color(0.6, 0.9, 0.3), {"type": "melee", "damage": 13, "speed": 3.2, "knockback": 2.0, "range": 24, "poison": 4.0}, "淬了黄蜂的毒。")
+	_add("regen_potion", "再生药水", "consumable", 1, {"icon": "potion", "color": Color(0.95, 0.4, 0.6), "use": {"buff": "再生", "time": 120.0, "effects": {"regen": 3.0}}})
+	_add("antidote", "解毒剂", "consumable", 0, {"icon": "potion", "color": Color(0.6, 1.0, 0.5), "use": {"cure": true}})
+	# 生物群系：水晶洞
+	_add("crystal_block", "晶石", "block", 1, {"place": TileDB.CRYSTAL_BLOCK, "desc": "会发出柔和的光，可以拿来装饰房子。"})
+	_add("prism_ore", "虹晶矿", "material", 2, {"place": TileDB.PRISM_ORE, "desc": "只在水晶洞里找得到。"})
+	_add("prism_bar", "虹晶锭", "material", 2, {"icon": "bar", "color": Color(1.0, 0.55, 0.9)})
+	_add("prism_lens", "虹光棱镜", "accessory", 3, {"icon": "lens", "color": Color(1.0, 0.6, 0.9), "effects": {"crit": 0.05, "damage": 0.05, "light": 3.0}})
+	_add_weapon("prism_sword", "虹晶剑", 3, "sword", Color(1.0, 0.55, 0.9), {"type": "melee", "damage": 24, "speed": 2.6, "knockback": 4.0, "range": 32})
+	_add_weapon("prism_repeater", "虹晶连弩", 3, "bow", Color(1.0, 0.55, 0.9), {"type": "bow", "damage": 14, "speed": 3.6, "knockback": 1.5, "shot_speed": 560.0})
 	# 液体相关
 	_add("obsidian", "黑曜石", "block", 1, {"place": TileDB.OBSIDIAN, "desc": "水和熔岩相遇时凝固而成。非常坚硬。"})
 	_add("empty_bucket", "空桶", "utility", 0, {"icon": "bucket", "color": Color(0, 0, 0, 0), "bucket": "empty"})
@@ -554,6 +598,18 @@ static func _build_recipes() -> void:
 	_r("mud_offering", 1, "workbench", {"mud_core": 15, "wood": 5})
 	_r("crystal_beacon", 1, "anvil", {"crystal_shard": 15, "moonsilver_bar": 5, "wisp_dust": 3})
 	_r("colossus_bulwark", 1, "anvil", {"colossus_shard": 12, "chitin": 6})
+	# 生物群系
+	_r("fur_scarf", 1, "workbench", {"wolf_pelt": 6})
+	_r("ice_cleats", 1, "anvil", {"ice_block": 20, "frost_shard": 4, "iron_bar": 2})
+	_r("frost_staff", 1, "anvil", {"frost_shard": 10, "iron_bar": 6})
+	_r("bitterroot_charm", 1, "workbench", {"jungle_spore": 12, "stinger": 2})
+	_r("venom_dagger", 1, "anvil", {"stinger": 8, "iron_bar": 4})
+	_r("regen_potion", 1, "workbench", {"jungle_spore": 3, "mushroom": 1, "glass_bottle": 1})
+	_r("antidote", 1, "workbench", {"jungle_spore": 2, "glass_bottle": 1})
+	_r("prism_bar", 1, "furnace", {"prism_ore": 4})
+	_r("prism_sword", 1, "anvil", {"prism_bar": 10})
+	_r("prism_repeater", 1, "anvil", {"prism_bar": 12, "bat_wing": 2})
+	_r("prism_lens", 1, "anvil", {"prism_bar": 6, "crystal_shard": 6})
 	# 液体相关
 	_r("empty_bucket", 1, "workbench", {"copper_bar": 3})
 	_r("breath_potion", 1, "workbench", {"mushroom": 1, "bat_wing": 1, "glass_bottle": 1})

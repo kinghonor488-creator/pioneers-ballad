@@ -499,11 +499,16 @@ func _draw_status(vs: Vector2) -> void:
 	var depth_m: int = (int(game.world.layers.surface) - ty) / 2
 	var depth_txt := ("海拔 %d 米" % depth_m) if depth_m >= 0 else ("深度 %d 米" % -depth_m)
 	_text(Vector2(x, 70), "第 %d 天  %02d:%02d" % [game.day, int(hours), int(fmod(hours, 1.0) * 60.0)], 14)
-	_text(Vector2(x, 90), "%s · %s" % [game.world.layer_name(ty), depth_txt], 14, Color(0.8, 0.85, 1))
+	var tx := int(p.center().x / 16.0)
+	var biome := String(WorldData.BIOME_NAMES.get(game.world.biome_at(tx, ty), ""))
+	var layer: String = game.world.layer_name(ty)
+	var where: String = layer if biome == "" or biome == layer else "%s · %s" % [biome, layer]
+	_text(Vector2(x, 90), "%s · %s" % [where, depth_txt], 14, Color(0.8, 0.85, 1))
 	var y := 114.0
 	for buff_name in game.buffs:
 		var b: Dictionary = game.buffs[buff_name]
-		_text(Vector2(x, y), "✧ %s  %d 秒" % [buff_name, ceili(b.time)], 13, Color(0.6, 0.9, 1))
+		var debuff := bool(b.get("debuff", false))
+		_text(Vector2(x, y), ("✖ %s  %d 秒" if debuff else "✧ %s  %d 秒") % [buff_name, ceili(b.time)], 13, Color(1, 0.5, 0.45) if debuff else Color(0.6, 0.9, 1))
 		y += 18.0
 	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))

@@ -2,6 +2,8 @@ class_name WorldGen
 extends RefCounted
 ## 程序化世界生成。同一个种子永远生成同一个世界。
 ## 从上到下的分层：天空 → 地表（草地/泥土/沙漠）→ 地下（石头夹泥土）→ 洞穴层（大溶洞）→ 深渊（玄武岩）→ 基岩
+## 从左到右的生物群系：出生点在中间（森林），雪原和丛林分在两边（一直延伸到深渊上方），
+## 沙漠夹在中间和其中一边之间；洞穴层里还藏着几个发光的水晶洞
 ## 步骤：
 ##   1. 每列算地表高度（两层噪声叠加，出生点附近压平）
 ##   2. 逐格填充泥土/石头/沙子/玄武岩和背景墙，用噪声挖出隧道和大溶洞
@@ -37,14 +39,35 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 	dirt_depth.resize(width)
 	var uw_off := PackedInt32Array()
 	uw_off.resize(width)
-	var desert_w := maxi(40, int(width * 0.07))
-	var desert_x0 := int(width * 0.18) if rng.randf() < 0.5 else int(width * 0.7)
-	var desert_x1 := desert_x0 + desert_w
 	var cx := width / 2
+	# 生物群系布局
+	var snow_left := rng.randf() < 0.5
+	var snow_c := int(width * (0.18 if snow_left else 0.82))
+	var jungle_c := int(width * (0.8 if snow_left else 0.2))
+	var snow_half := maxi(30, int(width * 0.06))
+	var jungle_half := maxi(35, int(width * 0.07))
+	var desert_w := maxi(40, int(width * 0.07))
+	var desert_x0 := int(width * (0.33 if rng.randf() < 0.5 else 0.6))
+	var desert_x1 := desert_x0 + desert_w
+	var biome_cols := PackedByteArray()
+	biome_cols.resize(width)
+	for x in width:
+		var j := int(n_bump.get_noise_1d(x * 0.3) * 6.0)   # 边界弯弯曲曲
+		var b := WorldData.B_FOREST
+		if absi(x - snow_c) + j < snow_half:
+			b = WorldData.B_SNOW
+		elif absi(x - jungle_c) + j < jungle_half:
+			b = WorldData.B_JUNGLE
+		elif x >= desert_x0 and x < desert_x1:
+			b = WorldData.B_DESERT
+		biome_cols[x] = b
+	w.biome_cols = biome_cols
 	for x in width:
 		var h := surface_base + n_hill.get_noise_1d(x) * height * 0.06 + n_bump.get_noise_1d(x) * 4.0
-		if x >= desert_x0 and x < desert_x1:
+		if biome_cols[x] == WorldData.B_DESERT:
 			h = lerpf(h, surface_base + 4.0 + n_bump.get_noise_1d(x * 0.5) * 3.0, 0.6)
+		elif biome_cols[x] == WorldData.B_JUNGLE:
+			h += n_bump.get_noise_1d(x * 1.7) * 5.0      # 丛林更崎岖
 		h = lerpf(surface_base, h, clampf(absf(x - cx) / 60.0, 0.0, 1.0))  # 出生点附近压平
 		surface[x] = int(h)
 		dirt_depth[x] = int(10.0 + (n_dirt.get_noise_1d(x) + 1.0) * 6.0)
@@ -60,7 +83,8 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 	for x in width:
 		var s := surface[x]
 		var dd := dirt_depth[x]
-		var desert := x >= desert_x0 and x < desert_x1
+		var b := biome_cols[x]
+		var desert := b == WorldData.B_DESERT
 		var uw := underworld_y + uw_off[x]
 		var idx := s * width + x
 		for y in range(s, height):
@@ -75,6 +99,15 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 			if y >= uw:
 				t = TileDB.BASALT
 				wall = TileDB.WALL_NONE
+			elif b == WorldData.B_JUNGLE:
+				wall = TileDB.WALL_MUD
+				t = TileDB.MUD if d < dd + 6 or p > 115 else TileDB.STONE
+			elif b == WorldData.B_SNOW:
+				wall = TileDB.WALL_ICE
+				if d < dd or p < 70:
+					t = TileDB.SNOW
+				elif p > 150:
+					t = TileDB.ICE
 			elif d < dd:
 				t = TileDB.SAND if desert else TileDB.DIRT
 				wall = TileDB.WALL_DIRT
@@ -122,6 +155,28 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 					if xx > 1 and xx < width - 2 and yy > 0 and yy < underworld_y:
 						T[yy * width + xx] = TileDB.AIR
 
+	# ---------- 3.2 水晶洞 ----------
+	var crystal_caves := []
+	for i in maxi(2, width / 500):
+		var ccx := rng.randi_range(40, width - 40)
+		var ccy := rng.randi_range(cavern_y + 20, underworld_y - 30)
+		var rx := rng.randi_range(14, 24)
+		var ry := rng.randi_range(9, 15)
+		crystal_caves.append(Rect2i(ccx - rx, ccy - ry, rx * 2, ry * 2))
+		for y in range(ccy - int(ry * 1.4) - 1, ccy + int(ry * 1.4) + 2):
+			for x in range(ccx - int(rx * 1.4) - 1, ccx + int(rx * 1.4) + 2):
+				if x < 1 or x >= width - 1 or y < 1 or y >= height - 8:
+					continue
+				var idx := y * width + x
+				var e := pow(float(x - ccx) / rx, 2.0) + pow(float(y - ccy) / ry, 2.0) + (patch[idx] - 128) / 400.0
+				if e < 1.0:
+					T[idx] = TileDB.AIR
+					WL[idx] = TileDB.WALL_CRYSTAL
+				elif e < 1.45:
+					var r := rng.randf()
+					T[idx] = TileDB.CRYSTAL_BLOCK if r < 0.5 else (TileDB.PRISM_ORE if r < 0.6 else TileDB.STONE)
+					WL[idx] = TileDB.WALL_CRYSTAL
+
 	# ---------- 3.5 地表湖泊 ----------
 	var lakes := maxi(1, width / 700)
 	for i in lakes:
@@ -162,15 +217,34 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 			if t != TileDB.AIR:
 				if t == TileDB.DIRT:
 					T[y * width + x] = TileDB.GRASS
+				elif t == TileDB.MUD:
+					T[y * width + x] = TileDB.JUNGLE_GRASS
 				tops[x] = y
 				break
+	# 地下丛林：泥浆露在洞里的一面也长草
+	for x in width:
+		if biome_cols[x] != WorldData.B_JUNGLE:
+			continue
+		for y in range(surface[x] + 1, underworld_y):
+			var idx := y * width + x
+			if T[idx] == TileDB.MUD and T[idx - width] == TileDB.AIR:
+				T[idx] = TileDB.JUNGLE_GRASS
 	var tx := 4
 	while tx < width - 4:
 		tx += rng.randi_range(4, 9)
-		if tx >= width - 4 or (tx >= desert_x0 - 2 and tx < desert_x1 + 2) or absi(tx - cx) < 6:
+		if tx >= width - 4 or absi(tx - cx) < 6:
+			continue
+		var tb := biome_cols[tx]
+		if tb == WorldData.B_DESERT or (tx >= desert_x0 - 2 and tx < desert_x1 + 2):
 			continue
 		var gy := tops[tx]
-		if gy < 16 or T[gy * width + tx] != TileDB.GRASS:
+		if gy < 22 or not T[gy * width + tx] in [TileDB.GRASS, TileDB.SNOW, TileDB.JUNGLE_GRASS]:
+			continue
+		if tb == WorldData.B_SNOW:
+			_boreal_tree(T, width, rng, tx, gy)
+			continue
+		if tb == WorldData.B_JUNGLE:
+			_jungle_tree(T, width, rng, tx, gy)
 			continue
 		var th := rng.randi_range(5, 12)
 		var ok := true
@@ -216,6 +290,28 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 			T[i] = TileDB.RELIC_CHEST
 			placed += 1
 
+	# 丛林：孢子花、藤蔓
+	for x in width:
+		if biome_cols[x] != WorldData.B_JUNGLE:
+			continue
+		for y in range(maxi(1, surface[x] - 25), underworld_y):
+			var idx := y * width + x
+			var t := T[idx]
+			if t == TileDB.AIR and T[idx + width] == TileDB.JUNGLE_GRASS and rng.randf() < 0.06:
+				T[idx] = TileDB.SPORE_FLOWER
+			elif TileDB.is_solid(t) and T[idx + width] == TileDB.AIR and y > surface[x] and rng.randf() < 0.09:
+				_hang_vine(T, width, idx + width, rng.randi_range(2, 6))
+	# 水晶洞：地面上长满灵晶簇
+	for r in crystal_caves:
+		for k in r.size.x * 2:
+			var x := rng.randi_range(r.position.x, r.end.x)
+			var y := rng.randi_range(r.position.y, r.end.y)
+			if x < 1 or x >= width - 1 or y < 1 or y >= height - 2:
+				continue
+			var idx := y * width + x
+			if T[idx] == TileDB.AIR and TileDB.is_solid(T[idx + width]):
+				T[idx] = TileDB.CRYSTAL
+
 	# ---------- 6. 洞穴水潭和熔岩池 ----------
 	for attempt in area / 800:
 		var x := rng.randi_range(2, width - 3)
@@ -251,6 +347,61 @@ static func _noise(s: int, freq: float, octaves: int) -> FastNoiseLite:
 	n.fractal_type = FastNoiseLite.FRACTAL_FBM if octaves > 1 else FastNoiseLite.FRACTAL_NONE
 	n.fractal_octaves = octaves
 	return n
+
+
+## 雪松：尖尖的塔形树冠
+static func _boreal_tree(T: PackedByteArray, width: int, rng: RandomNumberGenerator, tx: int, gy: int) -> void:
+	var th := rng.randi_range(7, 13)
+	for k in range(1, th + 3):
+		if T[(gy - k) * width + tx] != TileDB.AIR:
+			return
+	for k in range(1, th + 1):
+		T[(gy - k) * width + tx] = TileDB.TRUNK
+	var top := gy - th - 1
+	for dy in range(0, th - 2):
+		var half := 1 + dy / 2
+		var y := top + dy
+		for dx in range(-half, half + 1):
+			var li := y * width + tx + dx
+			if T[li] == TileDB.AIR:
+				T[li] = TileDB.BOREAL_LEAVES
+	T[(top - 1) * width + tx] = TileDB.BOREAL_LEAVES
+
+
+## 丛林树：又高又大的树冠，下面垂着藤蔓
+static func _jungle_tree(T: PackedByteArray, width: int, rng: RandomNumberGenerator, tx: int, gy: int) -> void:
+	var th := rng.randi_range(9, 17)
+	if gy - th - 6 < 2:
+		return
+	for k in range(1, th + 4):
+		if T[(gy - k) * width + tx] != TileDB.AIR:
+			return
+	for k in range(1, th + 1):
+		T[(gy - k) * width + tx] = TileDB.TRUNK
+	var top := gy - th
+	var rx := rng.randi_range(4, 5)
+	var ry := 3
+	for dy in range(-ry, ry + 1):
+		for dx in range(-rx, rx + 1):
+			if pow(float(dx) / rx, 2.0) + pow(float(dy) / ry, 2.0) <= 1.1:
+				var li := (top + dy) * width + tx + dx
+				if T[li] == TileDB.AIR:
+					T[li] = TileDB.JUNGLE_LEAVES
+	for dx in range(-rx + 1, rx):
+		if dx != 0 and rng.randf() < 0.4:
+			var y := top + ry
+			while T[y * width + tx + dx] == TileDB.JUNGLE_LEAVES:
+				y += 1
+			_hang_vine(T, width, y * width + tx + dx, rng.randi_range(1, 4))
+
+
+static func _hang_vine(T: PackedByteArray, width: int, start: int, length: int) -> void:
+	var i := start
+	for k in length:
+		if i >= T.size() or T[i] != TileDB.AIR:
+			return
+		T[i] = TileDB.VINE
+		i += width
 
 
 ## 往下找到洞穴地面，如果这一段地面两头都被石壁挡住（是个"盆"），就往里面灌液体，最多 rows 层

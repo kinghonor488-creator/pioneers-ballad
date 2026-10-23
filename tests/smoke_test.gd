@@ -260,6 +260,7 @@ func _test_game() -> void:
 
 	_test_lighting(main)
 	_test_liquids(main)
+	await _test_biomes(main)
 	await _test_combat(main)
 	await _test_bosses(main)
 
@@ -507,6 +508,140 @@ func _test_liquids(main: Node2D) -> void:
 	p.hp = p.max_hp
 
 
+func _test_biomes(main: Node2D) -> void:
+	print("== 生物群系 ==")
+	var w: WorldData = main.world
+	var p: Player = main.player
+	var inv: Inventory = main.inventory
+	var cb: Combat = main.combat
+	var bc := {}
+	for b in w.biome_cols:
+		bc[b] = int(bc.get(b, 0)) + 1
+	check(bc.has(WorldData.B_SNOW) and bc.has(WorldData.B_JUNGLE) and bc.has(WorldData.B_DESERT) and bc.has(WorldData.B_FOREST), "有森林、沙漠、雪原、丛林 %s" % [bc])
+	check(w.biome_at(w.spawn.x, w.spawn.y) == "forest", "出生点在森林")
+	var c := w.count_tiles()
+	check(int(c.get(TileDB.SNOW, 0)) > 0 and int(c.get(TileDB.ICE, 0)) > 0 and int(c.get(TileDB.BOREAL_LEAVES, 0)) > 0, "雪原有雪、冰和雪松")
+	check(int(c.get(TileDB.MUD, 0)) > 0 and int(c.get(TileDB.JUNGLE_GRASS, 0)) > 0 and int(c.get(TileDB.VINE, 0)) > 0 and int(c.get(TileDB.SPORE_FLOWER, 0)) > 0, "丛林有泥浆、丛林草、藤蔓和孢子花")
+	check(int(c.get(TileDB.CRYSTAL_BLOCK, 0)) > 0 and int(c.get(TileDB.PRISM_ORE, 0)) > 0, "水晶洞有晶石和虹晶矿")
+	var crystal_cell := Vector2i(-1, -1)
+	for i in w.walls.size():
+		if w.walls[i] == TileDB.WALL_CRYSTAL:
+			crystal_cell = Vector2i(i % w.width, i / w.width)
+			break
+	check(crystal_cell.x >= 0 and w.biome_at(crystal_cell.x, crystal_cell.y) == "crystal", "水晶洞能被识别出来")
+	# 雪原地表大部分是雪
+	var snow_top := 0
+	var snow_cols := 0
+	for x in w.width:
+		if w.biome_cols[x] == WorldData.B_SNOW:
+			snow_cols += 1
+			if w.get_tile(x, w.sky_y[x]) in [TileDB.SNOW, TileDB.ICE]:
+				snow_top += 1
+	check(snow_cols > 0 and snow_top > snow_cols * 0.7, "雪原地表铺着雪（%d/%d）" % [snow_top, snow_cols])
+	# 不同生物群系刷不同的怪
+	var ids := func(arr: Array) -> Array: return arr.map(func(e): return e[0])
+	check("frost_wolf" in ids.call(EnemyDB.candidates("地表", false, "snow")) and not "frost_wolf" in ids.call(EnemyDB.candidates("地表", false, "forest")), "霜狼只在雪原出现")
+	check("hornet" in ids.call(EnemyDB.candidates("地下", false, "jungle")) and "snapper" in ids.call(EnemyDB.candidates("地表", true, "jungle")), "丛林有黄蜂和毒刺花")
+	check("crystal_urchin" in ids.call(EnemyDB.candidates("洞穴层", false, "crystal")) and not "crystal_urchin" in ids.call(EnemyDB.candidates("洞穴层", false, "forest")), "晶刺刺猬只在水晶洞出现")
+
+	# 中毒、冻伤、解毒剂、免疫
+	p.hp = 100.0
+	main.add_debuff("中毒", 5.0)
+	check(main.buffs.has("中毒"), "可以中毒")
+	main._regen(1.0)
+	main._regen(1.0)
+	check(p.hp <= 95.0 and p.hp >= 92.0, "中毒每秒掉 3 点血（剩 %.0f）" % p.hp)
+	var move_before := p.move_mult
+	main.add_debuff("冻伤", 4.0)
+	check(p.move_mult < move_before - 0.3, "冻伤让人走得慢（%.2f → %.2f）" % [move_before, p.move_mult])
+	inv.slots[9] = ItemDB.make("antidote", 1)
+	check(main.use_consumable(9) and not main.buffs.has("中毒") and not main.buffs.has("冻伤"), "解毒剂解除中毒和冻伤")
+	inv.accessories[2] = ItemDB.make("bitterroot_charm")
+	main.recalc_stats()
+	main.add_debuff("中毒", 5.0)
+	check(not main.buffs.has("中毒"), "苦根护符免疫中毒")
+	inv.accessories[2] = null
+	main.recalc_stats()
+
+	# 冰面打滑
+	p.teleport(main.spawn_position())
+	for i in 20:
+		p.step(1.0 / 60.0, 0.0, false, false)
+	var fy := floori((p.position.y + Player.H + 1.0) / 16.0)
+	var fx0 := floori((p.position.x + 1.0) / 16.0)
+	var fx1 := floori((p.position.x + Player.W - 1.0) / 16.0)
+	# 铺一条平平的冰面，上面清空
+	var saved := {}
+	for x in range(fx0 - 2, fx1 + 8):
+		for y in range(fy - 3, fy + 1):
+			saved[Vector2i(x, y)] = w.get_tile(x, y)
+			w.set_tile(x, y, TileDB.ICE if y == fy else TileDB.AIR)
+	var x0 := p.position.x
+	p.velocity.x = 150.0
+	for i in 6:
+		p.step(1.0 / 60.0, 0.0, false, false)
+	var slide := p.velocity.x
+	p.teleport(Vector2(x0, p.position.y))
+	inv.accessories[2] = ItemDB.make("ice_cleats")
+	main.recalc_stats()
+	p.velocity.x = 150.0
+	for i in 6:
+		p.step(1.0 / 60.0, 0.0, false, false)
+	var grip := p.velocity.x
+	check(slide > 80.0 and grip < 10.0, "冰面很滑（还剩 %.0f 的速度），冰爪鞋能抓地（%.0f）" % [slide, grip])
+	inv.accessories[2] = null
+	main.recalc_stats()
+	for q in saved:
+		w.set_tile(q.x, q.y, saved[q])
+	p.teleport(main.spawn_position())
+
+	# 毒刺短剑让敌人中毒
+	cb.spawning_enabled = false
+	cb.clear()
+	var e := cb.spawn("rock_beetle", p.position + Vector2(60, -30))
+	var dagger := ItemDB.make("venom_dagger")
+	cb.deal_damage(e, dagger, 0.0, Vector2.RIGHT)
+	var hp_after_hit := e.hp
+	check(e.poison_t > 0.0, "毒刺短剑让敌人中毒")
+	for i in 60:
+		cb.physics_tick(1.0 / 60.0)
+	check(e.hp < hp_after_hit, "中毒的敌人会持续掉血")
+	cb.clear()
+	# 毒刺花吐种子
+	var plant := cb.spawn("snapper", p.position + Vector2(90, -40))
+	p.invuln = 99.0
+	var saw_seed := false
+	for i in 240:
+		cb.physics_tick(1.0 / 60.0)
+		for pr in cb.projectiles:
+			if is_instance_valid(pr) and pr.kind == "seed":
+				saw_seed = true
+	check(saw_seed and is_instance_valid(plant), "毒刺花会朝玩家吐毒种子")
+	cb.clear()
+	p.invuln = 0.0
+	cb.spawning_enabled = true
+
+	# 藤蔓：砍断上面，下面一串一起掉
+	var vine_top := Vector2i(-1, -1)
+	for i in w.tiles.size():
+		if w.tiles[i] == TileDB.VINE and w.tiles[i - w.width] != TileDB.VINE and w.tiles[i + w.width] == TileDB.VINE:
+			vine_top = Vector2i(i % w.width, i / w.width)
+			break
+	if vine_top.x >= 0:
+		main.break_tile(vine_top)
+		check(w.get_tile(vine_top.x, vine_top.y + 1) != TileDB.VINE, "砍断藤蔓，下面挂着的一串也会掉下来")
+	# 宝匣特产
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	var local := 0
+	for i in 40:
+		for it in ItemDB.roll_chest_loot(rng, 0.5, "jungle"):
+			if it.id in ["bitterroot_charm", "venom_dagger", "regen_potion"]:
+				local += 1
+	check(local >= 10, "丛林宝匣经常开出丛林特产（40 个里 %d 件）" % local)
+	p.hp = p.max_hp
+
+
 func _test_combat(main: Node2D) -> void:
 	print("== 战斗 ==")
 	var cb: Combat = main.combat
@@ -734,6 +869,7 @@ func _test_save_load(main: Node2D) -> void:
 	check(String(hdr.get("name", "")) == "测试世界" and int(hdr.get("width", 0)) == 600, "能读取存档头信息")
 	var data := SaveSystem.load_full(path)
 	check(not data.is_empty() and data.world.tiles == main.world.tiles and data.world.walls == main.world.walls, "图块和墙壁原样读回")
+	check(not data.is_empty() and data.world.biome_cols == main.world.biome_cols, "生物群系原样读回")
 	check(not data.is_empty() and data.world.liquid == main.world.liquid and main.world.liquid.count(0) < main.world.liquid.size(), "液体原样读回")
 	var size := FileAccess.open(path, FileAccess.READ).get_length()
 	print("  存档大小 %.1f KB（世界 600×300）" % (size / 1024.0))

@@ -111,6 +111,10 @@ static func load_full(path: String) -> Dictionary:
 	w.surface = h.get("surface", PackedInt32Array())
 	if w.surface.size() != w.width:
 		return {}
+	w.biome_cols = h.get("biomes", PackedByteArray())
+	if w.biome_cols.size() != w.width:   # 旧存档没有生物群系信息：全当森林
+		w.biome_cols.resize(w.width)
+		w.biome_cols.fill(WorldData.B_FOREST)
 	w.rebuild_sky()
 	return {"header": h, "world": w}
 

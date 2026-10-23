@@ -184,6 +184,9 @@ func deal_damage(e: Enemy, weapon: Variant, extra: float, dir: Vector2) -> int:
 	if e.flying():
 		kb_vec = dir.normalized() * kb * 45.0
 	var where := e.center()
+	var poison := float(ItemDB.weapon_def(weapon).get("poison", 0.0))
+	if poison > 0.0:
+		e.poison_t = maxf(e.poison_t, poison)
 	var killed := e.hit(amount, kb_vec)
 	popup(where + Vector2(0, -10), str(amount) + ("!" if crit else ""), Color(1, 0.85, 0.2) if crit else Color(1, 1, 1))
 	if weapon != null:
@@ -203,14 +206,15 @@ func _on_enemy_died(e: Enemy) -> void:
 		game.on_boss_defeated(e.id)
 
 
-func spawn_hostile_shot(pos: Vector2, vel: Vector2, dmg: int, kind: String = "fireball", phase: bool = false) -> void:
-	var colors := {"fireball": Color(1.0, 0.5, 0.2), "shard": Color(0.6, 1.0, 0.95), "wave": Color(0.6, 0.45, 0.3)}
+func spawn_hostile_shot(pos: Vector2, vel: Vector2, dmg: int, kind: String = "fireball", phase: bool = false, inflict: Array = []) -> void:
+	var colors := {"fireball": Color(1.0, 0.5, 0.2), "shard": Color(0.6, 1.0, 0.95), "wave": Color(0.6, 0.45, 0.3), "seed": Color(0.5, 0.85, 0.3)}
 	var pr := _new_projectile(kind, pos, vel, colors.get(kind, Color.WHITE))
 	pr.hostile = true
 	pr.damage = dmg
 	pr.phase = phase
+	pr.inflict = inflict
 	pr.life = 4.0 if kind != "wave" else 2.2
-	if kind != "wave":
+	if kind == "fireball" or kind == "shard":
 		pr.setup_light(0.6 if kind == "fireball" else 0.4)
 
 
@@ -255,8 +259,9 @@ func boss_phase_changed(b: Enemy) -> void:
 	game.shake(5.0)
 
 
-func hurt_player(amount: int, from: Vector2, reason: String) -> void:
-	game.damage(amount, reason, from)
+func hurt_player(amount: int, from: Vector2, reason: String, inflict: Array = []) -> void:
+	if game.damage(amount, reason, from) and inflict.size() >= 3 and rng.randf() < float(inflict[2]):
+		game.add_debuff(String(inflict[0]), float(inflict[1]))
 
 
 func _contact_damage() -> void:
@@ -266,7 +271,7 @@ func _contact_damage() -> void:
 	var pr := p.rect()
 	for e in enemies:
 		if is_instance_valid(e) and e.hp > 0.0 and e.visible and pr.intersects(e.rect()):
-			hurt_player(int(e.def.damage), e.center(), String(e.def.name))
+			hurt_player(int(e.def.damage), e.center(), String(e.def.name), e.def.get("inflict", []))
 			return
 
 
@@ -309,7 +314,7 @@ func try_spawn(force_id: String = "") -> Enemy:
 			continue
 		var id := force_id
 		if id == "":
-			var cands := EnemyDB.candidates(w.layer_name(ty), is_night())
+			var cands := EnemyDB.candidates(w.layer_name(ty), is_night(), w.biome_at(tx, ty))
 			if cands.is_empty():
 				continue
 			id = String(ItemDB.weighted_pick(cands, rng))

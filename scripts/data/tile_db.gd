@@ -10,7 +10,8 @@ extends RefCounted
 ##   drop     挖掉后得到的道具 id（见 ItemDB）
 ##   art      像素画风格（见 TileArt）
 ##   light    发光半径（图块数），0 表示不发光
-##   support  "floor" 需要下方有实心方块，"any" 需要旁边有方块或墙
+##   support  "floor" 需要下方有实心方块，"any" 需要旁边有方块或墙，"ceiling" 需要上方有东西挂着
+##   slippery 走在上面会打滑（冰）
 
 enum {
 	AIR, DIRT, GRASS, STONE, SAND, CLAY,
@@ -19,10 +20,13 @@ enum {
 	TORCH, WORKBENCH, FURNACE, ANVIL, RELIC_CHEST,
 	MUSHROOM, CRYSTAL, BASALT, EMBER_ORE, BEDROCK,
 	OBSIDIAN,  # 新图块只能加在这里（COUNT 前面），否则旧存档里的图块编号会错位
+	SNOW, ICE, BOREAL_LEAVES,
+	MUD, JUNGLE_GRASS, JUNGLE_LEAVES, VINE, SPORE_FLOWER,
+	CRYSTAL_BLOCK, PRISM_ORE,
 	COUNT,
 }
 
-enum { WALL_NONE, WALL_DIRT, WALL_STONE, WALL_COUNT }
+enum { WALL_NONE, WALL_DIRT, WALL_STONE, WALL_ICE, WALL_MUD, WALL_CRYSTAL, WALL_COUNT }
 
 const UNBREAKABLE_TIER := 99
 
@@ -30,6 +34,9 @@ const WALL_COLORS := [
 	Color(0, 0, 0, 0),
 	Color(0.24, 0.16, 0.1),
 	Color(0.2, 0.2, 0.23),
+	Color(0.3, 0.4, 0.5),
+	Color(0.17, 0.14, 0.1),
+	Color(0.2, 0.22, 0.38),
 ]
 
 const DEFS := {
@@ -59,6 +66,16 @@ const DEFS := {
 	BASALT: {"name": "玄武岩", "hardness": 2.4, "tier": 3, "drop": "basalt", "color": Color(0.21, 0.19, 0.23), "art": "basalt"},
 	EMBER_ORE: {"name": "熔晶矿", "hardness": 3.5, "tier": 5, "drop": "ember_ore", "color": Color(1.0, 0.45, 0.12), "art": "ore", "base": BASALT, "light": 2.5, "light_color": Color(1.0, 0.5, 0.2)},
 	OBSIDIAN: {"name": "黑曜石", "hardness": 3.0, "tier": 3, "drop": "obsidian", "color": Color(0.2, 0.13, 0.3), "art": "obsidian"},
+	SNOW: {"name": "雪块", "hardness": 0.5, "drop": "snow_block", "color": Color(0.9, 0.94, 1.0), "art": "snow"},
+	ICE: {"name": "冰", "hardness": 0.8, "drop": "ice_block", "color": Color(0.6, 0.8, 0.98), "art": "ice", "slippery": true},
+	BOREAL_LEAVES: {"name": "雪松叶", "solid": false, "hardness": 0.2, "kind": "wood", "drop": "", "color": Color(0.18, 0.4, 0.36), "art": "boreal"},
+	MUD: {"name": "泥浆", "hardness": 0.6, "drop": "mud_block", "color": Color(0.32, 0.25, 0.2)},
+	JUNGLE_GRASS: {"name": "丛林草", "hardness": 0.7, "drop": "mud_block", "color": Color(0.32, 0.25, 0.2), "art": "jgrass"},
+	JUNGLE_LEAVES: {"name": "丛林树叶", "solid": false, "hardness": 0.2, "kind": "wood", "drop": "", "color": Color(0.14, 0.52, 0.16), "art": "leaves"},
+	VINE: {"name": "藤蔓", "solid": false, "hardness": 0.05, "kind": "wood", "drop": "", "color": Color(0.2, 0.6, 0.2), "art": "vine", "support": "ceiling"},
+	SPORE_FLOWER: {"name": "孢子花", "solid": false, "hardness": 0.05, "drop": "jungle_spore", "color": Color(0.6, 1.0, 0.4), "art": "flower", "light": 2.5, "light_color": Color(0.6, 1.0, 0.4), "support": "floor"},
+	CRYSTAL_BLOCK: {"name": "晶石", "hardness": 1.8, "tier": 2, "drop": "crystal_block", "color": Color(0.55, 0.8, 1.0), "art": "crystalblock", "light": 2.0, "light_color": Color(0.55, 0.75, 1.0)},
+	PRISM_ORE: {"name": "虹晶矿", "hardness": 2.6, "tier": 3, "drop": "prism_ore", "color": Color(1.0, 0.5, 0.9), "art": "ore", "light": 1.8, "light_color": Color(1.0, 0.55, 0.9)},
 	BEDROCK: {"name": "深渊基岩", "hardness": 999.0, "tier": UNBREAKABLE_TIER, "drop": "", "color": Color(0.09, 0.08, 0.11), "art": "bedrock"},
 }
 
