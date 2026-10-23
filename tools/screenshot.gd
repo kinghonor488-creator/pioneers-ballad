@@ -24,6 +24,14 @@ func _shot(name: String) -> void:
 
 
 func _run() -> void:
+	var title: Control = load("res://scenes/title.tscn").instantiate()
+	root.add_child(title)
+	for i in 20:
+		await process_frame
+	await _shot("0_title")
+	title.queue_free()
+	await process_frame
+
 	var main: Node2D = load("res://scenes/main.tscn").instantiate()
 	main.world_seed = 2024
 	root.add_child(main)
@@ -62,4 +70,6 @@ func _run() -> void:
 	for i in 120:
 		await process_frame
 	await _shot("3_cave")
+	main.hud.menu_open = true
+	await _shot("4_pause_menu")
 	quit(0)

@@ -33,6 +33,19 @@ func _run() -> void:
 		var ms := Time.get_ticks_msec() - t0
 		print("  生成用时 %d 毫秒" % ms)
 		check(big.tiles.size() == 4200 * 1200, "完整世界尺寸正确")
+		var big_path := "user://test_saves/big.sav"
+		var hdr := {"name": "大世界", "width": big.width, "height": big.height, "spawn": big.spawn,
+			"layers": big.layers, "surface": big.surface, "seed": big.seed_value, "player": {}}
+		t0 = Time.get_ticks_msec()
+		check(SaveSystem.save(big_path, hdr, big) == OK, "完整世界能保存")
+		var save_ms := Time.get_ticks_msec() - t0
+		t0 = Time.get_ticks_msec()
+		var loaded := SaveSystem.load_full(big_path)
+		var load_ms := Time.get_ticks_msec() - t0
+		var kb := FileAccess.open(big_path, FileAccess.READ).get_length() / 1024.0
+		print("  保存 %d 毫秒，读取 %d 毫秒，文件 %.0f KB" % [save_ms, load_ms, kb])
+		check(not loaded.is_empty() and loaded.world.tiles == big.tiles, "完整世界原样读回")
+		SaveSystem.delete_save(big_path)
 	print("== 游戏场景 ==")
 	await _test_game()
 	print("\n%d 项检查，%d 项失败" % [checks, failures])
@@ -218,8 +231,122 @@ func _test_game() -> void:
 	for i in 30:
 		await process_frame
 	check(main.ready_done, "游戏主循环运行正常")
+
+	await _test_save_load(main)
+
+
+func _test_save_load(main: Node2D) -> void:
+	print("== 存档 / 读档 ==")
+	var path := "user://test_saves/smoke.sav"
+	SaveSystem.delete_save(path)
+	main.world_name = "测试世界"
+	main.save_path = path
+	main.day = 3
+	main.life_fruits = 2
+	main.inventory.slots[7] = ItemDB.make("ancient_pickaxe", 1)
+	main.inventory.slots[7].affix = "星选"
+	main.inventory.slots[7].xp = 321
+	check(main.save_game(false), "能保存游戏")
+	var hdr := SaveSystem.read_header(path)
+	check(String(hdr.get("name", "")) == "测试世界" and int(hdr.get("width", 0)) == 600, "能读取存档头信息")
+	var data := SaveSystem.load_full(path)
+	check(not data.is_empty() and data.world.tiles == main.world.tiles and data.world.walls == main.world.walls, "图块和墙壁原样读回")
+	var size := FileAccess.open(path, FileAccess.READ).get_length()
+	print("  存档大小 %.1f KB（世界 600×300）" % (size / 1024.0))
+	# 记下保存时的状态，然后用一个全新的主场景把它读回来
+	var tiles_before: PackedByteArray = main.world.tiles.duplicate()
+	var slots_before: Array = main.inventory.slots.duplicate(true)
+	var acc_before: Array = main.inventory.accessories.duplicate(true)
+	var pos_before: Vector2 = main.player.position
+	main.save_path = ""
 	main.queue_free()
 	await process_frame
+
+	GameSession.reset()
+	GameSession.save_path = path
+	GameSession.load_existing = true
+	var main2: Node2D = load("res://scenes/main.tscn").instantiate()
+	root.add_child(main2)
+	await main2.world_ready
+	check(main2.world.tiles == tiles_before, "重新进入后世界和保存时一样")
+	check(main2.world_name == "测试世界" and main2.day == 3 and main2.life_fruits == 2, "世界名、天数、生命果恢复")
+	check(main2.inventory.slots == slots_before, "背包原样恢复")
+	check(main2.inventory.accessories == acc_before, "饰品栏原样恢复")
+	var pick: Dictionary = main2.inventory.slots[7]
+	check(pick.affix == "星选" and int(pick.xp) == 321, "工具的词缀和熟练度恢复（%s）" % ItemDB.display_name(pick))
+	check(main2.buffs.has("采掘"), "药水增益恢复")
+	check(main2.player.position.distance_to(pos_before) < 0.5, "玩家位置恢复")
+	check(main2.player.max_hp == 100 + 2 * 20, "生命上限按生命果重新计算（%d）" % main2.player.max_hp)
+	main2.save_path = ""
+	main2.queue_free()
+	await process_frame
+	get_auto_accept_quit_reset()
+
+	# 损坏的存档不能把游戏弄崩
+	var bad := "user://test_saves/broken.sav"
+	var f := FileAccess.open(bad, FileAccess.WRITE)
+	f.store_string("这不是存档")
+	f.close()
+	check(SaveSystem.read_header(bad).is_empty() and SaveSystem.load_full(bad).is_empty(), "损坏的存档会被识别出来")
+	var trunc := "user://test_saves/truncated.sav"
+	var whole := FileAccess.get_file_as_bytes(path)
+	f = FileAccess.open(trunc, FileAccess.WRITE)
+	f.store_buffer(whole.slice(0, whole.size() / 2))
+	f.close()
+	check(SaveSystem.load_full(trunc).is_empty(), "只写了一半的存档会被识别出来")
+	SaveSystem.delete_save(bad)
+	SaveSystem.delete_save(trunc)
+	SaveSystem.delete_save(path)
+	check(not FileAccess.file_exists(path) and not FileAccess.file_exists(path + ".bak"), "能删除存档")
+	GameSession.reset()
+
+	# 标题界面能加载
+	var title: Control = load("res://scenes/title.tscn").instantiate()
+	root.add_child(title)
+	await process_frame
+	check(title.list_box != null, "标题界面能加载")
+	check(title.seed_from_text("") == 0 and title.seed_from_text("123") == 123 and title.seed_from_text("hello") > 0, "种子文字转换正确")
+	title.queue_free()
+	await process_frame
+
+	# 完整流程：标题界面 → 创建新世界 → 进入游戏 → 存档回到标题 → 列表里能看到
+	var t2: Control = load("res://scenes/title.tscn").instantiate()
+	root.add_child(t2)
+	current_scene = t2
+	await process_frame
+	t2.name_edit.text = "冒烟测试世界"
+	t2.size_option.select(0)
+	t2._create_world()
+	var m3: Node = null
+	for i in 600:
+		await process_frame
+		var cs := current_scene
+		if cs != null and cs.has_signal("world_ready") and cs.get("ready_done"):
+			m3 = cs
+			break
+	check(m3 != null, "从标题界面创建新世界并进入游戏")
+	if m3 == null:
+		return
+	var sp: String = m3.save_path
+	check(sp != "" and FileAccess.file_exists(sp), "新世界创建后立即存档")
+	check(m3.world.width == 1600 and m3.world_name == "冒烟测试世界", "按标题界面选的大小和名字生成")
+	m3.return_to_title()
+	for i in 5:
+		await process_frame
+	check(current_scene != null and current_scene.has_method("refresh_list"), "存档后回到标题界面")
+	var found := false
+	for e in SaveSystem.list_saves():
+		if e.path == sp and String(e.header.get("name", "")) == "冒烟测试世界":
+			found = true
+	check(found, "标题界面的世界列表里有刚才的世界")
+	SaveSystem.delete_save(sp)
+	current_scene.queue_free()
+	await process_frame
+	GameSession.reset()
+
+
+func get_auto_accept_quit_reset() -> void:
+	set_auto_accept_quit(true)
 
 
 func _find_recipe(result: String) -> Dictionary:

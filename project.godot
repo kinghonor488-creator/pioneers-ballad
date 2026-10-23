@@ -7,7 +7,7 @@ config_version=5
 
 config/name="星壤纪元 Starsoil"
 config/description="一个原创的 2D 沙盒冒险游戏（开发中）。"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 

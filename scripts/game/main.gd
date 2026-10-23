@@ -13,6 +13,8 @@ const NIGHT_AMBIENT := Color(0.32, 0.34, 0.5)
 const DAWN_AMBIENT := Color(0.95, 0.75, 0.65)
 const CAVE_AMBIENT := Color(0.13, 0.12, 0.16)
 const RARITY_GOLD := Color(1.0, 0.8, 0.35)
+const AUTOSAVE_INTERVAL := 300.0  ## 每 5 分钟自动保存一次
+const TITLE_SCENE := "res://scenes/title.tscn"
 
 @export var world_width := 4200
 @export var world_height := 1200
@@ -30,6 +32,10 @@ var canvas_mod: CanvasModulate
 var player_light: PointLight2D
 var rng := RandomNumberGenerator.new()
 var ready_done := false
+var world_name := "未命名世界"
+var save_path := ""             ## 空 = 不存档（自动测试时）
+var play_time := 0.0
+var _autosave_timer := AUTOSAVE_INTERVAL
 
 var time_of_day := 0.3
 var day := 1
@@ -48,6 +54,16 @@ var _respawn_timer := 0.0
 
 func _ready() -> void:
 	_setup_input()
+	# 标题界面选好的世界（自动测试时 GameSession 为空，就用上面的 @export 参数）
+	save_path = GameSession.save_path
+	var loading := GameSession.load_existing and save_path != ""
+	if save_path != "" and not loading:
+		world_name = GameSession.world_name
+		world_seed = GameSession.world_seed
+		world_width = GameSession.world_size.x
+		world_height = GameSession.world_size.y
+	if save_path != "":
+		get_tree().set_auto_accept_quit(false)  # 关窗口前先存档，见 _notification()
 	if world_seed == 0:
 		rng.randomize()
 		world_seed = rng.randi_range(1, 999999)
@@ -64,14 +80,29 @@ func _ready() -> void:
 	add_child(ui_layer)
 	hud = Hud.new()
 	ui_layer.add_child(hud)
-	hud.loading_text = "正在生成世界（%d × %d）……" % [world_width, world_height]
+	hud.loading_text = "正在读取世界……" if loading else "正在生成世界（%d × %d）……" % [world_width, world_height]
 
 	await get_tree().process_frame
 	await get_tree().process_frame
 
 	var t0 := Time.get_ticks_msec()
-	world = WorldGen.generate(world_width, world_height, world_seed)
-	print("[世界] 生成完成 %d×%d 种子=%d 用时 %d 毫秒" % [world_width, world_height, world_seed, Time.get_ticks_msec() - t0])
+	var header := {}
+	if loading:
+		var data := SaveSystem.load_full(save_path)
+		if data.is_empty():
+			GameSession.message = "读取存档失败：文件损坏或来自更新的版本。"
+			get_tree().set_auto_accept_quit(true)
+			get_tree().change_scene_to_file.call_deferred(TITLE_SCENE)
+			return
+		world = data.world
+		header = data.header
+		world_name = String(header.get("name", world_name))
+		world_seed = world.seed_value
+		rng.seed = world_seed * 7 + 1 + int(header.get("saved_at", 0))
+		print("[存档] 读取完成 %s 用时 %d 毫秒" % [save_path, Time.get_ticks_msec() - t0])
+	else:
+		world = WorldGen.generate(world_width, world_height, world_seed)
+		print("[世界] 生成完成 %d×%d 种子=%d 用时 %d 毫秒" % [world_width, world_height, world_seed, Time.get_ticks_msec() - t0])
 
 	renderer = WorldRenderer.new()
 	add_child(renderer)
@@ -107,15 +138,23 @@ func _ready() -> void:
 	add_child(canvas_mod)
 
 	inventory = Inventory.new()
-	_give_start_kit()
-	recalc_stats()
-	player.hp = player.max_hp
+	if loading:
+		_apply_save(header)
+	else:
+		_give_start_kit()
+		recalc_stats()
+		player.hp = player.max_hp
 
 	renderer.update_view(player.center(), _view_size(), true)
 	hud.loading_text = ""
 	hud.setup(self)
-	hud.notify("欢迎来到星壤纪元！按 E 打开背包和制作栏。", Color(1, 0.9, 0.5))
+	if loading:
+		hud.notify("欢迎回到「%s」！" % world_name, Color(1, 0.9, 0.5))
+	else:
+		hud.notify("欢迎来到星壤纪元！按 E 打开背包和制作栏，Esc 打开菜单。", Color(1, 0.9, 0.5))
 	ready_done = true
+	if save_path != "" and not loading:
+		save_game(false)  # 新世界立刻存一次，标题界面的列表里就能看到
 	world_ready.emit()
 
 
@@ -158,15 +197,20 @@ func _view_size() -> Vector2:
 # ---------------------------------------------------------------- 每帧更新
 
 func _physics_process(delta: float) -> void:
-	if not ready_done or dead:
+	if not ready_done or dead or hud.menu_open:
 		return
 	var dir := Input.get_axis("move_left", "move_right")
 	player.step(delta, dir, Input.is_action_just_pressed("jump"), Input.is_action_pressed("jump"))
 
 
 func _process(delta: float) -> void:
-	if not ready_done:
+	if not ready_done or hud.menu_open:
 		return
+	play_time += delta
+	if save_path != "":
+		_autosave_timer -= delta
+		if _autosave_timer <= 0.0:
+			save_game(true)
 	_update_time(delta)
 	_tick_buffs(delta)
 	recalc_stats()
@@ -629,3 +673,106 @@ func reforge_selected() -> bool:
 	item.affix = ItemDB.roll_affix(rng)
 	hud.notify("重铸完成：%s" % ItemDB.display_name(item), ItemDB.rarity_color(item))
 	return true
+
+
+# ---------------------------------------------------------------- 存档
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and save_path != "":
+		if ready_done:
+			save_game(false)
+		get_tree().quit()
+
+
+## 把当前游戏状态打包成存档头信息（图块数组另外压缩保存）
+func make_save_header() -> Dictionary:
+	return {
+		"name": world_name,
+		"seed": world_seed,
+		"width": world.width,
+		"height": world.height,
+		"spawn": world.spawn,
+		"layers": world.layers.duplicate(),
+		"surface": world.surface,
+		"saved_at": int(Time.get_unix_time_from_system()),
+		"play_time": play_time,
+		"day": day,
+		"time_of_day": time_of_day,
+		"player": {
+			"position": player.position,
+			"hp": player.hp,
+			"dead": dead,
+			"life_fruits": life_fruits,
+			"buffs": buffs.duplicate(true),
+			"slots": inventory.slots.duplicate(true),
+			"accessories": inventory.accessories.duplicate(true),
+			"selected": inventory.selected,
+			"cursor_item": hud.cursor_item,
+		},
+	}
+
+
+func save_game(quiet: bool) -> bool:
+	if save_path == "" or not ready_done:
+		return false
+	_autosave_timer = AUTOSAVE_INTERVAL
+	var t0 := Time.get_ticks_msec()
+	var err := SaveSystem.save(save_path, make_save_header(), world)
+	if err != OK:
+		hud.notify("保存失败（错误 %d）！" % err, Color(1, 0.35, 0.35))
+		return false
+	print("[存档] 已保存 %s 用时 %d 毫秒" % [save_path, Time.get_ticks_msec() - t0])
+	hud.notify("已自动保存。" if quiet else "游戏已保存。", Color(0.6, 0.9, 1.0) if quiet else Color(0.5, 1, 0.6))
+	return true
+
+
+func _apply_save(h: Dictionary) -> void:
+	play_time = float(h.get("play_time", 0.0))
+	day = int(h.get("day", 1))
+	time_of_day = float(h.get("time_of_day", 0.3))
+	var p: Dictionary = h.get("player", {})
+	life_fruits = clampi(int(p.get("life_fruits", 0)), 0, MAX_LIFE_FRUITS)
+	buffs = {}
+	var saved_buffs: Dictionary = p.get("buffs", {})
+	for k in saved_buffs:
+		var b: Variant = saved_buffs[k]
+		if typeof(b) == TYPE_DICTIONARY and b.has("effects") and b.has("time"):
+			buffs[k] = b
+	_load_slots(inventory.slots, p.get("slots", []))
+	_load_slots(inventory.accessories, p.get("accessories", []))
+	inventory.selected = clampi(int(p.get("selected", 0)), 0, Inventory.HOTBAR_SIZE - 1)
+	var held: Variant = p.get("cursor_item", null)
+	if _valid_item(held):
+		inventory.add_instance(held)
+	recalc_stats()
+	var pos: Variant = p.get("position", null)
+	if typeof(pos) == TYPE_VECTOR2 and not bool(p.get("dead", false)):
+		player.teleport(pos)
+		if player.collides_at(player.position):
+			player.teleport(spawn_position())
+	player.hp = clampf(float(p.get("hp", player.max_hp)), 1.0, player.max_hp)
+	inventory.changed.emit()
+
+
+## 读回背包格子；不认识的道具（比如以后删掉的）直接丢弃，不让旧存档把游戏弄崩
+func _load_slots(target: Array, saved: Variant) -> void:
+	if typeof(saved) != TYPE_ARRAY:
+		return
+	for i in mini(target.size(), saved.size()):
+		target[i] = saved[i] if _valid_item(saved[i]) else null
+
+
+func _valid_item(inst: Variant) -> bool:
+	return typeof(inst) == TYPE_DICTIONARY and inst.has("id") and inst.has("count") \
+		and ItemDB.exists(String(inst.id)) and int(inst.count) > 0
+
+
+func return_to_title() -> void:
+	save_game(false)
+	get_tree().set_auto_accept_quit(true)
+	get_tree().change_scene_to_file(TITLE_SCENE)
+
+
+func save_and_quit() -> void:
+	save_game(false)
+	get_tree().quit()

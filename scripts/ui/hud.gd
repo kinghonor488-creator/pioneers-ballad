@@ -15,6 +15,7 @@ var game: Node = null
 var font: Font
 var loading_text := ""
 var inventory_open := false
+var menu_open := false
 var cursor_item: Variant = null
 var messages: Array = []    ## [{"text", "color", "time", "key", "count"}]
 
@@ -117,6 +118,8 @@ func _panel_rects() -> Array:
 
 ## 鼠标是否在界面上（在界面上点击就不挖地）
 func blocks_mouse() -> bool:
+	if menu_open:
+		return true
 	if inventory_open and cursor_item != null:
 		return true
 	var m := get_viewport().get_mouse_position()
@@ -133,18 +136,28 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var k: int = event.physical_keycode
-		if k >= KEY_1 and k <= KEY_9:
+		if k == KEY_ESCAPE:
+			if inventory_open:
+				toggle_inventory()
+			else:
+				menu_open = not menu_open
+			get_viewport().set_input_as_handled()
+		elif menu_open:
+			return
+		elif k >= KEY_1 and k <= KEY_9:
 			game.inventory.selected = k - KEY_1
 		elif k == KEY_0:
 			game.inventory.selected = 9
 		elif k == KEY_E or k == KEY_TAB or k == KEY_I:
 			toggle_inventory()
 			get_viewport().set_input_as_handled()
-		elif k == KEY_ESCAPE and inventory_open:
-			toggle_inventory()
-			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.pressed:
 		var mb := event as InputEventMouseButton
+		if menu_open:
+			if mb.button_index == MOUSE_BUTTON_LEFT:
+				_click_menu(mb.position)
+			get_viewport().set_input_as_handled()
+			return
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 			game.inventory.selected = posmod(game.inventory.selected - 1, Inventory.HOTBAR_SIZE)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
@@ -152,6 +165,57 @@ func _input(event: InputEvent) -> void:
 		elif mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT:
 			if _click(mb.position, mb.button_index == MOUSE_BUTTON_RIGHT):
 				get_viewport().set_input_as_handled()
+
+
+# ---------------------------------------------------------------- 暂停菜单
+
+const MENU_BUTTONS := [
+	["resume", "继续游戏"],
+	["save", "保存游戏"],
+	["title", "保存并回到标题界面"],
+	["quit", "保存并退出游戏"],
+]
+
+
+func menu_button_rect(i: int) -> Rect2:
+	var vs := get_viewport_rect().size
+	return Rect2(vs.x * 0.5 - 150.0, vs.y * 0.5 - 70.0 + i * 52.0, 300.0, 42.0)
+
+
+func _click_menu(pos: Vector2) -> void:
+	for i in MENU_BUTTONS.size():
+		if menu_button_rect(i).has_point(pos):
+			match MENU_BUTTONS[i][0]:
+				"resume":
+					menu_open = false
+				"save":
+					if game.save_game(false):
+						menu_open = false
+					elif game.save_path == "":
+						notify("这个世界没有存档文件（测试模式）。", Color(1, 0.75, 0.45))
+				"title":
+					game.return_to_title()
+				"quit":
+					game.save_and_quit()
+			return
+
+
+func _draw_menu(vs: Vector2, m: Vector2) -> void:
+	draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0, 0.55))
+	var top := menu_button_rect(0).position - Vector2(30, 90)
+	var bottom := menu_button_rect(MENU_BUTTONS.size() - 1).end + Vector2(30, 46)
+	_panel(Rect2(top, bottom - top), 0.95)
+	_text(top + Vector2(30, 44), "游戏暂停", 26, Color(1, 0.88, 0.5))
+	_text(top + Vector2(30, 70), "世界：%s · 已游玩 %s" % [game.world_name, SaveSystem.format_duration(game.play_time)], 13, Color(0.75, 0.78, 0.88))
+	for i in MENU_BUTTONS.size():
+		var r := menu_button_rect(i)
+		var hover := r.has_point(m)
+		draw_rect(r, Color(0.25, 0.3, 0.5, 0.95) if hover else Color(0.14, 0.16, 0.26, 0.95))
+		draw_rect(r, Color(1, 0.88, 0.5, 0.9) if hover else Color(0.45, 0.5, 0.7, 0.7), false, 1.5)
+		var label: String = MENU_BUTTONS[i][1]
+		var tw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		_text(Vector2(r.position.x + (r.size.x - tw) * 0.5, r.position.y + 28.0), label, 17)
+	_text(Vector2(top.x + 30, bottom.y - 16), "每 5 分钟自动保存，关闭窗口时也会自动保存。", 12, Color(0.65, 0.68, 0.78))
 
 
 func toggle_inventory() -> void:
@@ -310,6 +374,9 @@ func _draw() -> void:
 	_draw_status(vs)
 	_draw_messages(vs)
 
+	if menu_open:
+		_draw_menu(vs, m)
+		return
 	if not _tip.is_empty() and cursor_item == null:
 		_draw_tooltip(m, _tip)
 	if cursor_item != null:
@@ -406,7 +473,7 @@ func _draw_status(vs: Vector2) -> void:
 		var b: Dictionary = game.buffs[buff_name]
 		_text(Vector2(x, y), "✧ %s  %d 秒" % [buff_name, ceili(b.time)], 13, Color(0.6, 0.9, 1))
 		y += 18.0
-	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用 · 1-0/滚轮 选格 · E 背包与制作", 12, Color(1, 1, 1, 0.5))
+	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))
 
 
