@@ -214,6 +214,8 @@ func _input(event: InputEvent) -> void:
 			game.inventory.selected = k - KEY_1
 		elif k == KEY_0:
 			game.inventory.selected = 9
+		elif k == KEY_Q:
+			game.drop_selected(event.shift_pressed)   # Q 丢 1 个，Shift+Q 丢整堆
 		elif k == KEY_E or k == KEY_TAB or k == KEY_I:
 			toggle_inventory()
 			get_viewport().set_input_as_handled()
@@ -234,6 +236,10 @@ func _input(event: InputEvent) -> void:
 			game.inventory.selected = posmod(game.inventory.selected + 1, Inventory.HOTBAR_SIZE)
 		elif mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT:
 			if _click(mb.position, mb.button_index == MOUSE_BUTTON_RIGHT):
+				get_viewport().set_input_as_handled()
+			elif mb.button_index == MOUSE_BUTTON_RIGHT:
+				# 在世界里右键：把选中的东西丢出去（Shift+右键丢整堆）
+				game.drop_selected(mb.shift_pressed)
 				get_viewport().set_input_as_handled()
 
 
@@ -336,6 +342,11 @@ func _click(pos: Vector2, right: bool) -> bool:
 	for r in _panel_rects():
 		if r.has_point(pos):
 			return true
+	if cursor_item != null and not right:
+		# 拿着东西点背包外面：扔出去
+		game.throw_instance(cursor_item)
+		cursor_item = null
+		return true
 	return false
 
 
@@ -530,7 +541,7 @@ func _draw_inventory(inv: Inventory, m: Vector2) -> void:
 		_tip = [["重铸", Color(0.8, 0.6, 1)], ["站在铁砧旁，花 2 个灵晶碎片给快捷栏选中的工具或武器重新随机一个词缀。", Color(0.85, 0.85, 0.9)]]
 		if sel != null and ItemDB.has_affix_slot(sel):
 			_tip.append(["当前：" + ItemDB.display_name(sel), ItemDB.rarity_color(sel)])
-	_text(rr.position + Vector2(0, 44), "左键拿起/放下 · 右键饰品直接装备", 12, Color(0.7, 0.72, 0.8))
+	_text(rr.position + Vector2(0, 44), "左键拿起/放下 · 拿着东西点外面可丢出 · 右键饰品直接装备", 12, Color(0.7, 0.72, 0.8))
 
 
 func _recipe_tip(rc: Dictionary, has_station: bool) -> Array:
@@ -581,7 +592,7 @@ func _draw_status(vs: Vector2) -> void:
 		var debuff := bool(b.get("debuff", false))
 		_text(Vector2(x, y), ("✖ %s  %d 秒" if debuff else "✧ %s  %d 秒") % [buff_name, ceili(b.time)], 13, Color(1, 0.5, 0.45) if debuff else Color(0.6, 0.9, 1))
 		y += 18.0
-	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档 · F11 全屏", 12, Color(1, 1, 1, 0.5))
+	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 右键/Q 丢出 · 1-0/滚轮 选格 · E 背包 · Esc 菜单 · F11 全屏", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))
 
 

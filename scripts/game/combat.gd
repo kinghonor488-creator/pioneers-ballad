@@ -17,7 +17,8 @@ var popups: Array = []          ## 伤害数字 {"pos", "text", "color", "t", "v
 var rng := RandomNumberGenerator.new()
 var font: Font
 
-var _swing := {}                ## 正在挥的剑 {"t", "dur", "dir", "weapon", "range", "hit": {}}
+var _swing := {}                ## 正在挥的东西 {"t", "dur", "dir", "weapon", "range", "hit": {}, "damage": 是否伤害敌人}
+var _aim := {}                  ## 正在举着射击的弓/法杖 {"t", "dur", "item", "aim": 方向}
 var _cooldown := 0.0
 var _spawn_timer := 2.0
 
@@ -63,6 +64,7 @@ func physics_tick(delta: float) -> void:
 	if boss != null and (not is_instance_valid(boss) or boss.hp <= 0.0):
 		boss = null
 	_update_swing(delta)
+	_process_aim(delta)
 	if not game.dead:
 		_contact_damage()
 	if spawning_enabled:
@@ -94,7 +96,7 @@ func use_weapon(item: Dictionary, target_px: Vector2) -> bool:
 	match String(w.type):
 		"melee":
 			var dur := clampf(0.85 / speed, 0.14, 0.35)
-			_swing = {"t": 0.0, "dur": dur, "dir": 1 if aim.x >= 0.0 else -1, "weapon": item, "range": float(w.range), "hit": {}}
+			_swing = {"t": 0.0, "dur": dur, "dir": 1 if aim.x >= 0.0 else -1, "weapon": item, "range": float(w.range), "hit": {}, "damage": true}
 		"bow":
 			var slot := find_ammo("arrow")
 			if slot < 0:
@@ -120,10 +122,28 @@ func use_weapon(item: Dictionary, target_px: Vector2) -> bool:
 			pr.pierce = int(w.get("pierce", 1))
 			pr.life = 1.6
 			pr.setup_light(0.7)
+	if String(w.type) != "melee":
+		_aim = {"t": 0.0, "dur": clampf(0.9 / speed, 0.15, 0.45), "item": item, "aim": aim}
+		game.shake(0.6)   # 射击的后坐力
 	_cooldown = 1.0 / speed
 	p.facing = 1 if aim.x >= 0.0 else -1
 	p.attack_anim = minf(1.0 / speed, 0.35)
 	return true
+
+
+## 挥动镐、斧、或者放方块时的动画（不伤害敌人）。上一下还没挥完就不打断。
+func start_tool_swing(item: Variant, target_px: Vector2, dur: float) -> void:
+	if not _swing.is_empty() or item == null:
+		return
+	var p := player()
+	var dir := 1 if target_px.x >= p.center().x else -1
+	p.facing = dir
+	p.attack_anim = dur
+	_swing = {"t": 0.0, "dur": dur, "dir": dir, "weapon": item, "range": 20.0, "hit": {}, "damage": false}
+
+
+func is_swinging() -> bool:
+	return not _swing.is_empty()
 
 
 func find_ammo(ammo_type: String) -> int:
@@ -155,6 +175,8 @@ func _update_swing(delta: float) -> void:
 	_swing.t += delta
 	if _swing.t >= _swing.dur:
 		_swing = {}
+		return
+	if not _swing.damage:
 		return
 	var p := player()
 	var r: float = _swing.range
@@ -189,17 +211,22 @@ func deal_damage(e: Enemy, weapon: Variant, extra: float, dir: Vector2) -> int:
 		e.poison_t = maxf(e.poison_t, poison)
 	var killed := e.hit(amount, kb_vec)
 	popup(where + Vector2(0, -10), str(amount) + ("!" if crit else ""), Color(1, 0.85, 0.2) if crit else Color(1, 1, 1))
+	# 打击感：火花 + 屏幕轻微震动（暴击震得更厉害）
+	game.debris.burst(where, Color(1, 0.95, 0.7) if crit else Color(e.def.color).lightened(0.3), 9 if crit else 5, 110.0, 30.0)
+	game.shake(2.6 if crit else 1.3)
 	if weapon != null:
 		game.add_weapon_xp(weapon, 5 if killed else 1)
 	return amount
 
 
 func _on_enemy_died(e: Enemy) -> void:
+	var at := e.center()
+	game.debris.burst(at, e.def.color, 14, 140.0, 60.0)
 	for inst in EnemyDB.roll_drops(e.id, rng):
-		game.give(inst)
+		game.give_at(inst, at)
 	var choice: Array = e.def.get("choice", [])
 	if not choice.is_empty():
-		game.give(ItemDB.make(choice[rng.randi() % choice.size()], 1, rng))
+		game.give_at(ItemDB.make(choice[rng.randi() % choice.size()], 1, rng), at)
 	game.on_enemy_killed(e.id)
 	if e == boss:
 		boss = null
@@ -375,7 +402,28 @@ func _despawn() -> void:
 
 # ---------------------------------------------------------------- 绘制（世界坐标）
 
+func _process_aim(delta: float) -> void:
+	if _aim.is_empty():
+		return
+	_aim.t += delta
+	if _aim.t >= _aim.dur:
+		_aim = {}
+
+
 func _draw() -> void:
+	if not _aim.is_empty() and is_instance_valid(game.player):
+		# 弓/法杖：朝瞄准方向举着，射出的一瞬间往后一顿（后坐力）
+		var p := player()
+		var aim: Vector2 = _aim.aim
+		var k: float = _aim.t / _aim.dur
+		var recoil := (1.0 - k) * (1.0 - k) * 4.0
+		var pivot := p.center() + Vector2(0, -2) + aim * (6.0 - recoil)
+		var flip := -1.0 if aim.x < 0.0 else 1.0
+		draw_set_transform(pivot, aim.angle() + PI * 0.25 * flip, Vector2(1.0, flip))
+		draw_texture(TileArt.icon(_aim.item.id), Vector2(-8, -8))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		if ItemDB.weapon_def(_aim.item).get("type", "") == "staff" and k < 0.4:
+			draw_circle(pivot + aim * 10.0, 4.0 * (1.0 - k / 0.4), Color(ItemDB.get_def(_aim.item.id).color, 0.8))
 	if not _swing.is_empty() and is_instance_valid(game.player):
 		var p := player()
 		var k: float = _swing.t / _swing.dur
@@ -383,13 +431,14 @@ func _draw() -> void:
 		var ang := lerpf(-2.0, 0.7, k)   # 从头顶上方挥到身前下方
 		var pivot := p.center() + Vector2(dir * 2.0, -2.0)
 		var reach: float = _swing.range
-		# 刀光
-		var pts := PackedVector2Array()
-		for i in 9:
-			var a := lerpf(-2.0, ang, i / 8.0) - PI * 0.25
-			pts.append(pivot + Vector2(cos(a) * dir, sin(a)) * reach * 0.9)
-		if pts.size() > 1:
-			draw_polyline(pts, Color(1, 1, 1, 0.35 * (1.0 - k)), 3.0)
+		# 刀光（工具没有刀光）
+		if _swing.damage:
+			var pts := PackedVector2Array()
+			for i in 9:
+				var a := lerpf(-2.0, ang, i / 8.0) - PI * 0.25
+				pts.append(pivot + Vector2(cos(a) * dir, sin(a)) * reach * 0.9)
+			if pts.size() > 1:
+				draw_polyline(pts, Color(1, 1, 1, 0.35 * (1.0 - k)), 3.0)
 		var icon := TileArt.icon(_swing.weapon.id)
 		var s := reach / 22.0
 		draw_set_transform(pivot, ang * dir, Vector2(dir * s, s))

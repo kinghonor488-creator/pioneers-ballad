@@ -201,7 +201,12 @@ func _test_game() -> void:
 	var before := inv.count_of(drop)
 	check(main.break_tile(feet, inv.slots[0]), "能挖掉脚下的 %s" % TileDB.tile_name(tile_id))
 	check(main.world.get_tile(feet.x, feet.y) == TileDB.AIR, "挖掉后变成空气")
-	check(drop == "" or inv.count_of(drop) == before + 1, "掉落物进了背包（%s）" % drop)
+	check(drop == "" or main.drops.size() >= 1, "挖出来的东西掉在地上（%s）" % drop)
+	check(drop == "" or inv.count_of(drop) == before, "掉在地上时还没进背包")
+	for i in 60:
+		main._tick_drops(1.0 / 60.0)
+	check(drop == "" or inv.count_of(drop) == before + 1, "站在旁边，掉落物被吸过来自动捡起（%s）" % drop)
+	check(main.drops.is_empty(), "捡起后地上的掉落物消失")
 
 	# 放回去
 	inv.slots[5] = ItemDB.make("dirt", 3)
@@ -259,6 +264,7 @@ func _test_game() -> void:
 	check(main.world.get_tile(bt.x, bt.y) == TileDB.AIR, "炸弹能炸掉方块")
 
 	_test_screen(main)
+	_test_feel_and_drops(main)
 	_test_lighting(main)
 	_test_liquids(main)
 	await _test_biomes(main)
@@ -271,6 +277,108 @@ func _test_game() -> void:
 	check(main.ready_done, "游戏主循环运行正常")
 
 	await _test_save_load(main)
+
+
+## 把地上所有掉落物搬到玩家身边，再让它们被吸进背包
+func _collect_drops(main: Node2D) -> void:
+	for d in main.drops:
+		if is_instance_valid(d):
+			d.position = main.player.center() - d.body_size * 0.5
+			d.pickup_delay = 0.0
+	for i in 10:
+		main._tick_drops(1.0 / 60.0)
+
+
+func _test_feel_and_drops(main: Node2D) -> void:
+	print("== 挥动、打击感、掉落物 ==")
+	var p: Player = main.player
+	var inv: Inventory = main.inventory
+	var w: WorldData = main.world
+	var cb: Combat = main.combat
+	# 按住鼠标挖矿时会一下一下地挥镐，每一下都有碎屑和震动
+	var pick := ItemDB.make("flint_pickaxe")
+	var t := Vector2i(floori(p.center().x / 16.0) + 1, floori((p.position.y + Player.H + 1.0) / 16.0))
+	w.set_tile(t.x, t.y, TileDB.STONE)
+	var before_debris: int = main.debris.count()
+	main._swing_clock = 999.0
+	main._shake = 0.0
+	var swung := false
+	for i in 20:
+		main.mine_step(t, pick, 1.0 / 60.0)
+		cb._update_swing(1.0 / 60.0)
+		swung = swung or cb.is_swinging()
+	check(swung, "挖掘时镐子会挥动")
+	check(main.debris.count() > before_debris and main._shake > 0.0, "每挥一下都有碎屑和震动反馈")
+	check(main.swing_period(ItemDB.make("iron_pickaxe")) < main.swing_period(pick), "更好的镐挥得更快")
+	main._shake = 0.0
+	var n_before: int = main.debris.count()
+	main.break_tile(t, pick)
+	check(main.debris.count() >= n_before + 8 and main._shake >= 1.5, "挖碎方块时溅出一大片碎屑，屏幕震一下")
+	# 打中敌人也有火花和震动
+	cb.spawning_enabled = false
+	cb.clear()
+	var e := cb.spawn("rock_beetle", p.position + Vector2(40, -30))
+	main._shake = 0.0
+	n_before = main.debris.count()
+	cb.deal_damage(e, ItemDB.make("iron_sword"), 0.0, Vector2.RIGHT)
+	check(main.debris.count() > n_before and main._shake > 1.0, "武器打中敌人有火花和震动")
+	cb.clear()
+	cb._cooldown = 0.0
+	inv.add("arrow", 5)
+	cb.use_weapon(ItemDB.make("wooden_bow"), p.center() + Vector2(80, 0))
+	check(not cb._aim.is_empty(), "射箭时会举起弓瞄准")
+	cb.clear()
+	cb._aim = {}
+	_collect_drops(main)
+
+	# 右键 / Q 丢东西；刚丢出去的不会马上被吸回来
+	inv.slots[8] = ItemDB.make("wood", 10)
+	inv.selected = 8
+	check(main.drop_selected(false) and int(inv.slots[8].count) == 9 and main.drops.size() == 1, "丢出 1 个木材")
+	for i in 30:
+		main._tick_drops(1.0 / 60.0)
+	check(main.drops.size() == 1 and inv.count_of("wood") == 9, "刚丢出去的东西不会马上被捡回来")
+	for i in 60:
+		main._tick_drops(1.0 / 60.0)
+	main.drops[0].position = p.center() + Vector2(24, -10)   # 走到它旁边
+	for i in 60:
+		main._tick_drops(1.0 / 60.0)
+	check(main.drops.is_empty() and inv.count_of("wood") == 10, "过一会儿走近又能自动捡回来")
+	check(main.drop_selected(true) and inv.slots[8] == null and int(main.drops[0].item.count) == 10, "Shift 丢出整堆")
+	# 远处的不吸；靠近才吸
+	var far: ItemDrop = main.drops[0]
+	far.position = p.center() + Vector2(16 * 10, -40)
+	far.pickup_delay = 0.0
+	for i in 30:
+		main._tick_drops(1.0 / 60.0)
+	check(main.drops.size() == 1, "离得远的掉落物不会被吸过来")
+	# 合并：同一个地方掉的同种东西合成一堆
+	main.give_at(ItemDB.make("stone", 3), far.center())
+	main.give_at(ItemDB.make("stone", 2), far.center())
+	var stone_piles := 0
+	for d in main.drops:
+		if d.item.id == "stone":
+			stone_piles += 1
+	check(stone_piles == 1, "同一个地方掉的同种东西会合成一堆")
+	# 磁石戒指扩大拾取范围
+	inv.accessories[2] = ItemDB.make("magnet_ring")
+	main.recalc_stats()
+	for i in 120:
+		main._tick_drops(1.0 / 60.0)
+	check(main.drops.is_empty(), "戴上磁石戒指，远处的东西也会被吸过来")
+	inv.accessories[2] = null
+	main.recalc_stats()
+	# 背包满了就不吸
+	var saved_slots: Array = inv.slots.duplicate(true)
+	for i in inv.slots.size():
+		inv.slots[i] = ItemDB.make("flint_pickaxe")
+	main.give_at(ItemDB.make("dirt", 1), p.center())
+	for i in 60:
+		main._tick_drops(1.0 / 60.0)
+	check(main.drops.size() == 1, "背包满了，掉落物留在地上")
+	inv.slots = saved_slots
+	_collect_drops(main)
+	cb.spawning_enabled = true
 
 
 func _test_screen(main: Node2D) -> void:
@@ -680,6 +788,7 @@ func _test_combat(main: Node2D) -> void:
 			break
 		cb.deal_damage(e, sword, 0.0, Vector2.RIGHT)
 	check(e.hp <= 0.0, "能打死敌人")
+	_collect_drops(main)
 	check(inv.count_of("mud_core") > cores, "击败泥团怪掉落泥核")
 	check(int(main.kills.get("mudling", 0)) == 1, "击杀计数 +1")
 
@@ -815,6 +924,7 @@ func _test_bosses(main: Node2D) -> void:
 			break
 		cb.deal_damage(b, sword, 0.0, Vector2.RIGHT)
 	check(b.hp <= 0.0 and cb.boss == null, "能打败泥沼巨像")
+	_collect_drops(main)
 	check(inv.count_of("mud_heart") == hearts + 1 and inv.count_of("colossus_shard") >= 6, "掉落泥王之心和巨像碎片")
 	check(inv.count_of("mud_hammer") + inv.count_of("sludge_staff") >= 1, "随机掉落一把 Boss 专属武器")
 	check(int(main.bosses.get("mud_colossus", 0)) == 1, "记录了击败泥沼巨像")
@@ -859,6 +969,7 @@ func _test_bosses(main: Node2D) -> void:
 		if not is_instance_valid(wd) or wd.hp <= 0.0:
 			break
 		cb.deal_damage(wd, sword, 0.0, Vector2.RIGHT)
+	_collect_drops(main)
 	check(wd.hp <= 0.0 and inv.count_of("warden_prism") >= prisms + 3 and inv.count_of("warden_eye") >= 1, "打败守望者，掉落棱晶和守望之眼")
 
 	# 玩家死了 Boss 会离开
@@ -883,6 +994,8 @@ func _test_save_load(main: Node2D) -> void:
 	main.inventory.slots[7] = ItemDB.make("ancient_pickaxe", 1)
 	main.inventory.slots[7].affix = "星选"
 	main.inventory.slots[7].xp = 321
+	main.give_at(ItemDB.make("crystal_shard", 7), main.player.center() + Vector2(16 * 12, -32))
+	var drops_before: int = main.drops.size()
 	check(main.save_game(false), "能保存游戏")
 	var hdr := SaveSystem.read_header(path)
 	check(String(hdr.get("name", "")) == "测试世界" and int(hdr.get("width", 0)) == 600, "能读取存档头信息")
@@ -914,6 +1027,7 @@ func _test_save_load(main: Node2D) -> void:
 	var pick: Dictionary = main2.inventory.slots[7]
 	check(pick.affix == "星选" and int(pick.xp) == 321, "工具的词缀和熟练度恢复（%s）" % ItemDB.display_name(pick))
 	check(main2.buffs.has("采掘"), "药水增益恢复")
+	check(main2.drops.size() == drops_before and main2.drops.any(func(d): return d.item.id == "crystal_shard" and int(d.item.count) == 7), "地上的掉落物也会保存")
 	check(int(main2.bosses.get("mud_colossus", 0)) == 1 and int(main2.kills.get("mudling", 0)) >= 1, "Boss 击败记录和击杀数恢复")
 	check(main2.player.position.distance_to(pos_before) < 0.5, "玩家位置恢复")
 	check(main2.player.max_hp == 100 + 2 * 20, "生命上限按生命果重新计算（%d）" % main2.player.max_hp)

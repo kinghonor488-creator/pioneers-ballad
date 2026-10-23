@@ -34,7 +34,7 @@ const EFFECT_NAMES := {
 	"light": "照明", "nofall": "免疫摔落伤害", "maxhp": "最大生命", "luck": "双倍掉落几率",
 	"power": "挖掘力", "defense": "防御", "damage": "伤害", "crit": "暴击率",
 	"mana": "法力上限", "speed": "攻击速度", "knockback": "击退",
-	"breath": "水下呼吸时间", "lavares": "熔岩伤害减免", "regen": "生命恢复",
+	"breath": "水下呼吸时间", "lavares": "熔岩伤害减免", "regen": "生命恢复", "pickup": "拾取范围",
 }
 
 ## 熟练度：达到这些经验值就升级（Lv0 ~ Lv5）
@@ -290,6 +290,8 @@ static func effects_lines(effects: Dictionary) -> Array:
 				out.append("免疫冻伤")
 			"icegrip":
 				out.append("在冰面上不打滑")
+			"pickup":
+				out.append("拾取范围 +%d 格" % int(v))
 			_:
 				out.append("%s +%d%%" % [EFFECT_NAMES.get(k, k), roundi(float(v) * 100.0)])
 	return out
@@ -495,6 +497,7 @@ static func _build_items() -> void:
 	_add("miner_gloves", "矿工手套", "accessory", 1, {"icon": "glove", "color": Color(0.75, 0.55, 0.3), "effects": {"mine": 0.2}})
 	_add("reach_bracer", "延伸臂环", "accessory", 2, {"icon": "bracer", "color": Color(0.75, 0.85, 1.0), "effects": {"reach": 2}})
 	_add("vital_amulet", "活力护符", "accessory", 2, {"icon": "amulet", "color": Color(1.0, 0.35, 0.4), "effects": {"maxhp": 25}})
+	_add("magnet_ring", "磁石戒指", "accessory", 1, {"icon": "bracer", "color": Color(0.85, 0.3, 0.3), "effects": {"pickup": 5}, "desc": "远处的东西也会被吸过来。"})
 	_add("chitin_charm", "甲壳护符", "accessory", 1, {"icon": "chitin", "color": Color(0.5, 0.55, 0.62), "effects": {"defense": 4}})
 	_add("berserker_emblem", "狂战徽记", "accessory", 2, {"icon": "emblem", "color": Color(0.9, 0.3, 0.25), "effects": {"damage": 0.12}})
 	_add("hunter_goggles", "猎手护目镜", "accessory", 2, {"icon": "goggles", "color": Color(0.45, 0.8, 0.5), "effects": {"crit": 0.08}})
@@ -618,6 +621,7 @@ static func _build_recipes() -> void:
 	# 怪物材料做的饰品和道具
 	_r("spring_shoes", 1, "workbench", {"mud_core": 12, "iron_bar": 2})
 	_r("chitin_charm", 1, "anvil", {"chitin": 8, "iron_bar": 2})
+	_r("magnet_ring", 1, "anvil", {"iron_bar": 5, "copper_bar": 5})
 	_r("batwing_cloak", 1, "anvil", {"bat_wing": 8, "moonsilver_bar": 3})
 	_r("glow_potion", 2, "workbench", {"wisp_dust": 2, "glass_bottle": 2})
 	_r("heal_potion", 2, "workbench", {"mud_core": 3, "mushroom": 1, "glass_bottle": 2})

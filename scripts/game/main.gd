@@ -16,6 +16,9 @@ const AUTOSAVE_INTERVAL := 300.0  ## 每 5 分钟自动保存一次
 const BASE_BREATH := 10.0         ## 在水下能憋气多少秒
 const LIQUID_TICK := 0.05         ## 液体每秒流动 20 步
 const LAVA_DAMAGE := 30
+const PICKUP_RADIUS := 3.5        ## 走到离掉落物多少格以内就会把它吸过来
+const MAX_DROPS := 300
+const THROW_PICKUP_DELAY := 1.2   ## 自己丢出去的东西，过多久才会被吸回来
 ## 负面效果：effects 和增益一样合并进属性；immune 是能免疫它的属性
 const DEBUFFS := {
 	"中毒": {"effects": {"dot": 3.0}, "immune": "immune_poison", "color": Color(0.55, 0.95, 0.35)},
@@ -38,6 +41,10 @@ var cursor: TileCursor
 var combat: Combat
 var lighting: Lighting
 var liquids: LiquidSim
+var debris: Debris
+var drops: Array = []            ## 地上的掉落物（ItemDrop）
+var _swing_clock := 999.0        ## 按住挖掘时的挥动节奏
+var _impact_pending := false
 var breath := BASE_BREATH
 var _liquid_timer := 0.0
 var _drown_timer := 1.0
@@ -126,6 +133,11 @@ func _ready() -> void:
 	renderer = WorldRenderer.new()
 	add_child(renderer)
 	renderer.setup(world, lighting.material)
+
+	debris = Debris.new()
+	debris.z_index = 9
+	debris.material = lighting.material
+	add_child(debris)
 
 	cursor = TileCursor.new()
 	cursor.z_index = 10
@@ -224,6 +236,7 @@ func _physics_process(delta: float) -> void:
 	var dir := Input.get_axis("move_left", "move_right")
 	player.step(delta, dir, Input.is_action_just_pressed("jump"), Input.is_action_pressed("jump"))
 	combat.physics_tick(delta)
+	_tick_drops(delta)
 
 
 func _process(delta: float) -> void:
@@ -350,7 +363,7 @@ func _tick_buffs(delta: float) -> void:
 func recalc_stats() -> void:
 	var s := {"move": 0.0, "jump": 0.0, "mine": 0.0, "reach": 0.0, "light": 0.0, "nofall": false, "maxhp": 0.0,
 		"defense": 0.0, "damage": 0.0, "crit": 0.0, "mana": 0.0, "speed": 0.0, "breath": 0.0, "lavares": 0.0,
-		"dot": 0.0, "regen": 0.0, "immune_poison": false, "immune_frost": false, "icegrip": false}
+		"dot": 0.0, "regen": 0.0, "immune_poison": false, "immune_frost": false, "icegrip": false, "pickup": 0.0}
 	for a in inventory.accessories:
 		if a != null:
 			_merge_effects(s, ItemDB.get_def(a.id).get("effects", {}))
@@ -406,6 +419,8 @@ func _handle_use(delta: float) -> void:
 	var want := Input.is_action_pressed("use") and not hud.blocks_mouse()
 	if not want:
 		_mine_progress = 0.0
+		_swing_clock = 999.0   # 下次按下时马上挥第一下
+		_impact_pending = false
 		cursor.progress = 0.0
 		cursor.queue_redraw()
 		return
@@ -414,6 +429,7 @@ func _handle_use(delta: float) -> void:
 	if item != null and d.has("place"):
 		if _use_cooldown <= 0.0 and place_item(t, inventory.selected):
 			_use_cooldown = 0.12
+			combat.start_tool_swing(item, get_global_mouse_position(), 0.12)
 	elif cat == "consumable":
 		if Input.is_action_just_pressed("use"):
 			use_consumable(inventory.selected)
@@ -433,7 +449,23 @@ func _handle_use(delta: float) -> void:
 
 # ---------------------------------------------------------------- 挖掘
 
+## 挥一下需要多久：挖掘力越大挥得越快
+func swing_period(item: Variant) -> float:
+	var p := maxf(ItemDB.mining_power(item, "earth"), ItemDB.mining_power(item, "wood")) * (1.0 + float(stats.get("mine", 0.0)))
+	return clampf(0.32 / sqrt(maxf(p, 0.1)), 0.14, 0.36)
+
+
 func mine_step(t: Vector2i, item: Variant, delta: float) -> void:
+	# 按住鼠标时一下一下地挥动，挥到底的那一刻有"敲击"反馈
+	var period := swing_period(item)
+	_swing_clock += delta
+	if _swing_clock >= period:
+		_swing_clock = fmod(_swing_clock, period) if _swing_clock < period * 2.0 else 0.0
+		combat.start_tool_swing(item, get_global_mouse_position(), period * 0.95)
+		_impact_pending = true
+	var impact := _impact_pending and _swing_clock >= period * 0.55
+	if impact:
+		_impact_pending = false
 	if not in_reach(t, item):
 		_mine_progress = 0.0
 		cursor.progress = 0.0
@@ -444,6 +476,14 @@ func mine_step(t: Vector2i, item: Variant, delta: float) -> void:
 		cursor.progress = 0.0
 		return
 	var need := TileDB.tier(id)
+	var center := Vector2(t) * TS + Vector2(TS, TS) * 0.5
+	if impact:
+		if ItemDB.tool_tier(item) < need:
+			debris.burst(center, Color(0.85, 0.85, 0.9), 3, 70.0, 20.0)   # 挖不动：只溅几点火星
+			shake(0.4)
+		else:
+			debris.burst(center, tile_color(id), 3, 55.0, 40.0)
+			shake(0.6)
 	if ItemDB.tool_tier(item) < need:
 		if need >= TileDB.UNBREAKABLE_TIER:
 			hud.hint("%s 无法被破坏。" % TileDB.tile_name(id))
@@ -463,11 +503,26 @@ func mine_step(t: Vector2i, item: Variant, delta: float) -> void:
 		break_tile(t, item)
 
 
-## 破坏一个图块并把掉落物放进背包。返回是否成功。
+## 碎屑用的颜色
+func tile_color(id: int) -> Color:
+	match id:
+		TileDB.GRASS:
+			return Color(0.35, 0.6, 0.25)
+		TileDB.JUNGLE_GRASS:
+			return Color(0.25, 0.55, 0.22)
+		TileDB.TORCH:
+			return Color(1.0, 0.7, 0.3)
+	return TileDB.prop(id, "color", Color(0.6, 0.6, 0.6))
+
+
+## 破坏一个图块，掉落物落在地上（走近会自动捡起）。返回是否成功。
 func break_tile(t: Vector2i, item: Variant = null) -> bool:
 	var id := world.get_tile(t.x, t.y)
 	if id == TileDB.AIR or TileDB.tier(id) >= TileDB.UNBREAKABLE_TIER:
 		return false
+	var center := Vector2(t) * TS + Vector2(TS, TS) * 0.5
+	debris.burst(center, tile_color(id), 10, 90.0, 60.0)
+	shake(3.2 if id == TileDB.TRUNK else (2.4 if id == TileDB.RELIC_CHEST else 1.6))
 	var gained := []
 	if id == TileDB.TRUNK:
 		gained = _fell_tree(t)
@@ -487,7 +542,7 @@ func break_tile(t: Vector2i, item: Variant = null) -> bool:
 		if id == TileDB.LEAVES and rng.randf() < 0.08:
 			gained.append(ItemDB.make("apple", 1))
 	for g in gained:
-		give(g)
+		give_at(g, center, 1.6 if id == TileDB.RELIC_CHEST else 1.0)
 	_check_supports(t)
 	if ItemDB.is_tool_item(item):
 		_add_tool_xp(item, maxi(1, roundi(TileDB.hardness(id))))
@@ -511,6 +566,8 @@ func _fell_tree(start: Vector2i) -> Array:
 		else:
 			continue
 		world.set_tile(p.x, p.y, TileDB.AIR)
+		if seen.size() % 2 == 0:
+			debris.burst(Vector2(p) * TS + Vector2(8, 8), tile_color(id), 2, 60.0, 30.0)   # 木屑和落叶
 		for dxy in [Vector2i(0, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(0, 1)]:
 			var q: Vector2i = p + dxy
 			if q.y > start.y or seen.has(q):
@@ -536,7 +593,7 @@ func _check_supports(t: Vector2i) -> void:
 			world.set_tile(q.x, q.y, TileDB.AIR)
 			var drop := String(TileDB.prop(id, "drop", ""))
 			if drop != "":
-				give(ItemDB.make(drop, 1))
+				give_at(ItemDB.make(drop, 1), Vector2(q) * TS + Vector2(8, 8))
 			_check_supports(q)   # 一整串藤蔓会一起掉下来
 
 
@@ -703,6 +760,89 @@ func explode(center: Vector2, radius: float) -> void:
 		player.velocity += (player.center() - center).normalized() * 350.0
 
 
+# ---------------------------------------------------------------- 掉落物
+
+## 在世界里 pos 处掉出一个道具（会蹦一下再落地）
+func give_at(inst: Dictionary, pos: Vector2, pop: float = 1.0) -> void:
+	if int(inst.get("count", 0)) <= 0:
+		return
+	var vel := Vector2(randf_range(-70.0, 70.0), randf_range(-170.0, -110.0)) * pop
+	spawn_drop(inst, pos, vel, 0.0)
+
+
+## 生成掉落物。附近已经有同样的一堆就直接合并进去。
+func spawn_drop(inst: Dictionary, pos: Vector2, vel: Vector2, delay: float) -> ItemDrop:
+	if ItemDB.max_stack(inst.id) > 1 and delay <= 0.0:
+		for d in drops:
+			if is_instance_valid(d) and ItemDB.can_stack(d.item, inst) and d.center().distance_to(pos) < 24.0 \
+					and int(d.item.count) + int(inst.count) <= ItemDB.max_stack(inst.id):
+				d.item.count += int(inst.count)
+				return d
+	var d := ItemDrop.new()
+	d.setup(world, inst.duplicate(true), pos, vel)
+	d.pickup_delay = delay
+	d.z_index = 7
+	d.material = lighting.material
+	add_child(d)
+	drops.append(d)
+	if drops.size() > MAX_DROPS:
+		var old: ItemDrop = drops.pop_front()
+		old.queue_free()
+	return d
+
+
+func pickup_radius() -> float:
+	return (PICKUP_RADIUS + float(stats.get("pickup", 0.0))) * TS
+
+
+func _tick_drops(delta: float) -> void:
+	if drops.is_empty():
+		return
+	var target := player.center()
+	var radius := pickup_radius()
+	var keep := []
+	for d in drops:
+		if not is_instance_valid(d):
+			continue
+		var one := {"id": d.item.id, "count": 1}
+		var can_take: bool = not dead and inventory.can_fit(one)
+		if d.tick(delta, target, radius, can_take):
+			var want := int(d.item.count)
+			var left := inventory.add_instance(d.item)
+			if want - left > 0:
+				hud.notify_item(d.item, want - left)
+			if left <= 0:
+				d.queue_free()
+				continue
+			d.item.count = left
+		keep.append(d)
+	drops = keep
+
+
+## 把快捷栏选中的东西丢出去：whole = 整堆，否则丢 1 个
+func drop_selected(whole: bool) -> bool:
+	var item = inventory.selected_item()
+	if item == null:
+		return false
+	var n := int(item.count) if whole else 1
+	var inst: Dictionary = item.duplicate(true)
+	inst.count = n
+	inventory.consume_slot(inventory.selected, n)
+	throw_instance(inst)
+	return true
+
+
+## 从玩家身上朝面对的方向丢出一个道具实例
+func throw_instance(inst: Dictionary) -> void:
+	var dir := float(player.facing)
+	var m := get_global_mouse_position()
+	if absf(m.x - player.center().x) > 4.0:
+		dir = signf(m.x - player.center().x)
+	player.facing = int(dir)
+	spawn_drop(inst, player.center() + Vector2(dir * 8.0, -4.0), Vector2(dir * 190.0, -130.0), THROW_PICKUP_DELAY)
+
+
+## 直接放进背包（制作、换桶等）；放不下的掉在脚边
 func give(inst: Dictionary) -> void:
 	if int(inst.count) <= 0:
 		return
@@ -711,7 +851,10 @@ func give(inst: Dictionary) -> void:
 	if got > 0:
 		hud.notify_item(inst, got)
 	if left > 0:
-		hud.hint("背包满了！%s ×%d 掉进了虚空。" % [ItemDB.display_name(inst), left])
+		var rest: Dictionary = inst.duplicate(true)
+		rest.count = left
+		spawn_drop(rest, player.center(), Vector2(0, -80), THROW_PICKUP_DELAY)
+		hud.hint("背包满了，%s ×%d 掉在了脚边。" % [ItemDB.display_name(inst), left])
 
 
 # ---------------------------------------------------------------- 液体
@@ -800,6 +943,7 @@ func damage(amount: int, reason: String, from: Vector2 = Vector2.INF) -> bool:
 			return false
 		amount = maxi(1, amount - int(float(stats.get("defense", 0.0)) * 0.5))
 		player.invuln = 0.6
+		shake(2.2)
 		var away := signf(player.center().x - from.x)
 		player.velocity = Vector2((away if away != 0.0 else 1.0) * 230.0, -200.0)
 	player.hp -= amount
@@ -930,7 +1074,16 @@ func make_save_header() -> Dictionary:
 			"selected": inventory.selected,
 			"cursor_item": hud.cursor_item,
 		},
+		"drops": _saved_drops(),
 	}
+
+
+func _saved_drops() -> Array:
+	var out := []
+	for d in drops:
+		if is_instance_valid(d):
+			out.append({"pos": d.center(), "item": d.item})
+	return out
 
 
 func save_game(quiet: bool) -> bool:
@@ -976,6 +1129,11 @@ func _apply_save(h: Dictionary) -> void:
 		if player.collides_at(player.position):
 			player.teleport(spawn_position())
 	player.hp = clampf(float(p.get("hp", player.max_hp)), 1.0, player.max_hp)
+	var saved_drops: Variant = h.get("drops", [])
+	if typeof(saved_drops) == TYPE_ARRAY:
+		for sd in saved_drops:
+			if typeof(sd) == TYPE_DICTIONARY and typeof(sd.get("pos")) == TYPE_VECTOR2 and _valid_item(sd.get("item")):
+				spawn_drop(sd.item, sd.pos, Vector2.ZERO, 0.0)
 	inventory.changed.emit()
 
 
