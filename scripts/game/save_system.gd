@@ -9,13 +9,14 @@ extends RefCounted
 ##     头信息字典（世界名字、种子、尺寸、时间、玩家、背包……）—— 列出存档时只读这一块，很快
 ##     图块数组（zstd 压缩）
 ##     背景墙数组（zstd 压缩）
+##     液体数组（zstd 压缩，版本 2 起才有；读旧存档时当作没有液体）
 ##
 ## 写入时先写到 .tmp，写完再改名覆盖；旧存档保留为 .bak，写到一半断电也不会丢档。
 
 const SAVE_DIR := "user://saves"
 const EXT := ".sav"
 const MAGIC := "STSV"
-const VERSION := 1
+const VERSION := 2
 
 
 static func new_save_path() -> String:
@@ -38,6 +39,7 @@ static func save(path: String, header: Dictionary, world: WorldData) -> Error:
 	_store_block(f, var_to_bytes(header))
 	_store_block(f, world.tiles.compress(FileAccess.COMPRESSION_ZSTD))
 	_store_block(f, world.walls.compress(FileAccess.COMPRESSION_ZSTD))
+	_store_block(f, world.liquid.compress(FileAccess.COMPRESSION_ZSTD))
 	var err := f.get_error()
 	f.close()
 	if err != OK:
@@ -68,6 +70,7 @@ static func _read_header(f: FileAccess) -> Dictionary:
 	var h: Variant = bytes_to_var(block)
 	if typeof(h) != TYPE_DICTIONARY or not h.has("width") or not h.has("player"):
 		return {}
+	h["_version"] = ver
 	return h
 
 
@@ -79,6 +82,7 @@ static func load_full(path: String) -> Dictionary:
 	var h := _read_header(f)
 	if h.is_empty():
 		return {}
+	var version := int(h.get("_version", 1))
 	var tiles_c := _read_block(f)
 	var walls_c := _read_block(f)
 	if tiles_c.is_empty() or walls_c.is_empty():
@@ -91,6 +95,16 @@ static func load_full(path: String) -> Dictionary:
 	w.walls = walls_c.decompress(n, FileAccess.COMPRESSION_ZSTD)
 	if n <= 0 or w.tiles.size() != n or w.walls.size() != n:
 		return {}
+	if version >= 2:
+		var liq_c := _read_block(f)
+		if liq_c.is_empty():
+			return {}
+		w.liquid = liq_c.decompress(n, FileAccess.COMPRESSION_ZSTD)
+		if w.liquid.size() != n:
+			return {}
+	else:
+		w.liquid.resize(n)
+		w.liquid.fill(0)
 	w.seed_value = int(h.get("seed", 0))
 	w.spawn = h.get("spawn", Vector2i(w.width / 2, 0))
 	w.layers = h.get("layers", {})

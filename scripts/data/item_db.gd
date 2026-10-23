@@ -25,7 +25,7 @@ const RARITY_COLORS := [
 const CATEGORY_NAMES := {
 	"block": "方块", "material": "材料", "tool": "工具", "consumable": "消耗品",
 	"accessory": "饰品", "furniture": "家具", "throwable": "投掷物",
-	"weapon": "武器", "ammo": "弹药",
+	"weapon": "武器", "ammo": "弹药", "utility": "器具",
 }
 const WEAPON_TYPE_NAMES := {"melee": "近战", "bow": "远程", "staff": "魔法"}
 const STATION_NAMES := {"": "徒手", "workbench": "工作台", "furnace": "熔炉", "anvil": "铁砧"}
@@ -34,6 +34,7 @@ const EFFECT_NAMES := {
 	"light": "照明", "nofall": "免疫摔落伤害", "maxhp": "最大生命", "luck": "双倍掉落几率",
 	"power": "挖掘力", "defense": "防御", "damage": "伤害", "crit": "暴击率",
 	"mana": "法力上限", "speed": "攻击速度", "knockback": "击退",
+	"breath": "水下呼吸时间", "lavares": "熔岩伤害减免",
 }
 
 ## 熟练度：达到这些经验值就升级（Lv0 ~ Lv5）
@@ -277,6 +278,10 @@ static func effects_lines(effects: Dictionary) -> Array:
 				out.append("防御 +%d" % int(v))
 			"mana":
 				out.append("法力上限 +%d" % int(v))
+			"breath":
+				out.append("可以在水下自由呼吸" if float(v) >= 50.0 else "水下呼吸时间 +%d%%" % roundi(float(v) * 100.0))
+			"lavares":
+				out.append("熔岩伤害 -%d%%" % roundi(float(v) * 100.0))
 			_:
 				out.append("%s +%d%%" % [EFFECT_NAMES.get(k, k), roundi(float(v) * 100.0)])
 	return out
@@ -348,6 +353,9 @@ static func tooltip(inst: Variant) -> Array:
 			lines.append(["召唤 Boss：%s" % EnemyDB.get_def(u.summon).name, Color(1.0, 0.5, 0.45)])
 		if u.has("maxhp"):
 			lines.append(["永久提升最大生命 %d（最多使用 5 次）" % int(u.maxhp), good])
+	if d.has("bucket"):
+		var bk := String(d.bucket)
+		lines.append(["对准水或熔岩点一下，把它装起来" if bk == "empty" else "对准空的地方点一下，把%s倒出来" % ("水" if bk == "water" else "熔岩"), Color(0.6, 0.8, 1.0)])
 	if d.has("throw"):
 		lines.append(["扔出后 %.1f 秒爆炸，半径 %d 格" % [float(d.throw.fuse), int(d.throw.radius)], Color(1.0, 0.7, 0.4)])
 	if d.has("place"):
@@ -368,7 +376,7 @@ static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float) -> Array
 			["glowstone_necklace", 9], ["miner_gloves", 7], ["reach_bracer", 6],
 			["vital_amulet", 8], ["ancient_pickaxe", 4], ["wanderer_core", 1.0 + depth01 * 3.0],
 			["gale_dagger", 4], ["berserker_emblem", 5], ["hunter_goggles", 5], ["spring_pendant", 5],
-			["starstone_bow", 1.0 + depth01 * 2.0],
+			["starstone_bow", 1.0 + depth01 * 2.0], ["snorkel", 5],
 		]
 		out.append(make(String(weighted_pick(pool, rng)), 1, rng))
 	else:
@@ -380,6 +388,7 @@ static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float) -> Array
 		[["iron_bar", 3, 8], 6], [["moonsilver_bar", 2, 6], 6.0 * depth01], [["life_fruit", 1, 1], 1.0 + 2.0 * depth01],
 		[["glow_potion", 1, 2], 4], [["miner_potion", 1, 2], 4], [["big_bomb", 1, 2], 2.0 * depth01],
 		[["arrow", 20, 50], 6], [["flame_arrow", 10, 30], 3.0 * depth01],
+		[["empty_bucket", 1, 2], 3], [["breath_potion", 1, 2], 3],
 	]
 	for i in rng.randi_range(2, 4):
 		var e: Array = weighted_pick(extras, rng)
@@ -390,7 +399,7 @@ static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float) -> Array
 # ---------------------------------------------------------------- 数据定义
 
 static func _add(id: String, display: String, cat: String, rarity_value: int, props: Dictionary = {}) -> void:
-	var stackable := cat in ["block", "material", "consumable", "throwable", "furniture"]
+	var stackable := cat in ["block", "material", "consumable", "throwable", "furniture", "ammo", "utility"]
 	var d := {"id": id, "name": display, "category": cat, "rarity": rarity_value, "stack": 999 if stackable else 1, "desc": ""}
 	d.merge(props, true)
 	_items[id] = d
@@ -510,6 +519,14 @@ static func _build_weapons() -> void:
 	_add_weapon("sludge_staff", "淤泥法杖", 3, "staff", Color(0.55, 0.42, 0.25), {"type": "staff", "damage": 18, "speed": 2.2, "knockback": 3.0, "mana": 6, "shot_speed": 300.0, "pierce": 2})
 	_add_weapon("prism_staff", "棱晶法杖", 4, "staff", Color(0.85, 0.55, 1.0), {"type": "staff", "damage": 26, "speed": 2.4, "knockback": 3.0, "mana": 8, "shot_speed": 420.0, "pierce": 5}, "一道光能贯穿一排敌人。")
 	_add_weapon("prism_crossbow", "棱光弩", 4, "bow", Color(0.85, 0.55, 1.0), {"type": "bow", "damage": 17, "speed": 3.2, "knockback": 2.0, "shot_speed": 620.0}, "连射如雨。")
+	# 液体相关
+	_add("obsidian", "黑曜石", "block", 1, {"place": TileDB.OBSIDIAN, "desc": "水和熔岩相遇时凝固而成。非常坚硬。"})
+	_add("empty_bucket", "空桶", "utility", 0, {"icon": "bucket", "color": Color(0, 0, 0, 0), "bucket": "empty"})
+	_add("water_bucket", "水桶", "utility", 0, {"icon": "bucket", "color": Color(0.3, 0.55, 1.0), "bucket": "water"})
+	_add("lava_bucket", "熔岩桶", "utility", 1, {"icon": "bucket", "color": Color(1.0, 0.45, 0.12), "bucket": "lava", "desc": "小心烫手。"})
+	_add("breath_potion", "水息药水", "consumable", 1, {"icon": "potion", "color": Color(0.35, 0.85, 1.0), "use": {"buff": "水息", "time": 300.0, "effects": {"breath": 99.0}}})
+	_add("snorkel", "潜水呼吸管", "accessory", 1, {"icon": "snorkel", "color": Color(0.55, 0.85, 1.0), "effects": {"breath": 2.0}})
+	_add("magma_charm", "熔火护符", "accessory", 3, {"icon": "amulet", "color": Color(1.0, 0.4, 0.15), "effects": {"lavares": 0.7}, "desc": "用黑曜石和余烬核心打造，能挡住大部分熔岩的灼烧。"})
 	# 怪物掉落的材料
 	_add("mud_core", "泥核", "material", 0, {"icon": "blob", "color": Color(0.55, 0.4, 0.25), "desc": "泥团怪身体里黏糊糊的核心。"})
 	_add("bat_wing", "蝠翼膜", "material", 1, {"icon": "wing", "color": Color(0.45, 0.32, 0.5), "desc": "又薄又韧。"})
@@ -537,6 +554,11 @@ static func _build_recipes() -> void:
 	_r("mud_offering", 1, "workbench", {"mud_core": 15, "wood": 5})
 	_r("crystal_beacon", 1, "anvil", {"crystal_shard": 15, "moonsilver_bar": 5, "wisp_dust": 3})
 	_r("colossus_bulwark", 1, "anvil", {"colossus_shard": 12, "chitin": 6})
+	# 液体相关
+	_r("empty_bucket", 1, "workbench", {"copper_bar": 3})
+	_r("breath_potion", 1, "workbench", {"mushroom": 1, "bat_wing": 1, "glass_bottle": 1})
+	_r("snorkel", 1, "workbench", {"glass": 4, "bat_wing": 2})
+	_r("magma_charm", 1, "anvil", {"obsidian": 15, "ember_core": 2})
 	# 怪物材料做的饰品和道具
 	_r("spring_shoes", 1, "workbench", {"mud_core": 12, "iron_bar": 2})
 	_r("chitin_charm", 1, "anvil", {"chitin": 8, "iron_bar": 2})

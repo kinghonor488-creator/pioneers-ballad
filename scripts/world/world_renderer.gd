@@ -10,6 +10,7 @@ const TS := 16
 var world: WorldData
 var tile_layer: TileMapLayer
 var wall_layer: TileMapLayer
+var liquid_layer: TileMapLayer
 var max_chunks_per_frame := 6
 
 var _loaded := {}  # Vector2i(区块) -> true
@@ -27,18 +28,24 @@ func setup(w: WorldData, lit_material: Material = null) -> void:
 	tile_layer.tile_set = _make_tileset(TileArt.build_tile_atlas(), TileDB.COUNT)
 	tile_layer.material = lit_material
 	add_child(tile_layer)
+	liquid_layer = TileMapLayer.new()
+	liquid_layer.name = "Liquids"
+	liquid_layer.tile_set = _make_tileset(TileArt.build_liquid_atlas(), WorldData.LIQ_MAX + 1, 2, 0)
+	liquid_layer.material = lit_material
+	liquid_layer.z_index = 8   # 画在玩家和敌人前面（半透明的水能看见水里的东西）
+	add_child(liquid_layer)
 	world.tile_changed.connect(_on_tile_changed)
 
 
-func _make_tileset(img: Image, columns: int) -> TileSet:
+func _make_tileset(img: Image, columns: int, rows: int = TileArt.VARIANTS, first_column: int = 1) -> TileSet:
 	var ts := TileSet.new()
 	ts.tile_size = Vector2i(TS, TS)
 	var src := TileSetAtlasSource.new()
 	src.texture = ImageTexture.create_from_image(img)
 	src.texture_region_size = Vector2i(TS, TS)
 	ts.add_source(src, 0)
-	for x in range(1, columns):
-		for y in TileArt.VARIANTS:
+	for x in range(first_column, columns):
+		for y in rows:
 			src.create_tile(Vector2i(x, y))
 	return ts
 
@@ -91,6 +98,8 @@ func _load_chunk(c: Vector2i) -> void:
 				wall_layer.set_cell(Vector2i(x, y), 0, Vector2i(wl, v))
 			if t != 0:
 				tile_layer.set_cell(Vector2i(x, y), 0, Vector2i(t, v))
+			elif world.liquid[row + x] != 0:
+				_set_liquid_cell(x, y)
 	_loaded[c] = true
 
 
@@ -101,7 +110,35 @@ func _unload_chunk(c: Vector2i) -> void:
 		for x in range(x0, mini(x0 + CHUNK, world.width)):
 			tile_layer.erase_cell(Vector2i(x, y))
 			wall_layer.erase_cell(Vector2i(x, y))
+			liquid_layer.erase_cell(Vector2i(x, y))
 	_loaded.erase(c)
+
+
+## 液体格子：上面还有液体时画成满格，这样一整片水看起来是连着的
+func _set_liquid_cell(x: int, y: int) -> void:
+	var v := world.liquid[y * world.width + x]
+	if v == 0:
+		liquid_layer.erase_cell(Vector2i(x, y))
+		return
+	var amt := v & 15
+	if world.liquid_type(x, y - 1) != WorldData.LIQ_NONE:
+		amt = 0   # 第 0 列：上面还有液体的满格
+	liquid_layer.set_cell(Vector2i(x, y), 0, Vector2i(amt, (v >> 4) - 1))
+
+
+## 处理这一帧所有变了的液体格子（由主控每帧调用）
+func flush_liquids() -> void:
+	var dirty := world.liquid_dirty
+	if dirty.is_empty():
+		return
+	world.liquid_dirty = []
+	var w := world.width
+	for i in dirty:
+		var x: int = i % w
+		var y: int = i / w
+		for yy in [y, y + 1]:
+			if yy < world.height and _loaded.has(Vector2i(x / CHUNK, yy / CHUNK)):
+				_set_liquid_cell(x, yy)
 
 
 func _on_tile_changed(x: int, y: int) -> void:

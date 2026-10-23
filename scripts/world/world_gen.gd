@@ -8,7 +8,8 @@ extends RefCounted
 ##   3. 挖几个通往地下的天然洞口
 ##   4. 地表泥土长草，种树
 ##   5. 撒矿石、蘑菇、灵晶簇和遗迹宝匣
-##   6. 选出生点
+##   6. 地表湖泊、洞穴水潭、深处的熔岩池（生成时就是静止的，不占模拟时间）
+##   7. 选出生点
 
 static func generate(width: int, height: int, seed_value: int) -> WorldData:
 	var w := WorldData.new(width, height)
@@ -24,6 +25,7 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 
 	var T := w.tiles   # 局部副本，最后再写回去（比每次走成员访问快）
 	var WL := w.walls
+	var LQ := w.liquid
 
 	# ---------- 1. 地表高度 ----------
 	var n_hill := _noise(seed_value, 0.0035, 3)
@@ -120,6 +122,36 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 					if xx > 1 and xx < width - 2 and yy > 0 and yy < underworld_y:
 						T[yy * width + xx] = TileDB.AIR
 
+	# ---------- 3.5 地表湖泊 ----------
+	var lakes := maxi(1, width / 700)
+	for i in lakes:
+		var lx := rng.randi_range(60, width - 60)
+		if absi(lx - cx) < 90 or (lx > desert_x0 - 40 and lx < desert_x1 + 40):
+			continue
+		var half := rng.randi_range(10, 20)
+		var depth := rng.randi_range(5, 9)
+		var water_y := surface[lx] + 2
+		for x in range(lx - half, lx + half + 1):
+			var k := 1.0 - pow(float(x - lx) / half, 2.0)
+			var d := int(depth * sqrt(maxf(k, 0.0)))
+			for y in range(mini(surface[x], water_y) - 1, water_y + d + 1):
+				var idx := y * width + x
+				if y <= water_y + d and y >= water_y:
+					T[idx] = TileDB.AIR
+					WL[idx] = TileDB.WALL_NONE
+					LQ[idx] = (WorldData.LIQ_WATER << 4) | WorldData.LIQ_MAX
+				elif y < water_y:
+					T[idx] = TileDB.AIR   # 湖岸以上清空
+					WL[idx] = TileDB.WALL_NONE
+			# 湖底铺沙
+			for y in range(water_y + d + 1, water_y + d + 3):
+				T[y * width + x] = TileDB.SAND
+		# 湖两边如果比水面低，用泥土垫高，免得一开始就漏水
+		for x in [lx - half - 1, lx + half + 1, lx - half - 2, lx + half + 2]:
+			for y in range(water_y, water_y + 3):
+				if T[y * width + x] == TileDB.AIR:
+					T[y * width + x] = TileDB.DIRT
+
 	# ---------- 4. 草地和树 ----------
 	var tops := PackedInt32Array()
 	tops.resize(width)
@@ -184,7 +216,16 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 			T[i] = TileDB.RELIC_CHEST
 			placed += 1
 
-	# ---------- 6. 出生点 ----------
+	# ---------- 6. 洞穴水潭和熔岩池 ----------
+	for attempt in area / 800:
+		var x := rng.randi_range(2, width - 3)
+		var y := rng.randi_range(rock_y, height - 8)
+		var typ := WorldData.LIQ_WATER
+		if y > underworld_y - 30 or (y > cavern_y and rng.randf() < 0.15):
+			typ = WorldData.LIQ_LAVA
+		_fill_basin(T, LQ, width, x, y, typ, rng.randi_range(2, 6))
+
+	# ---------- 7. 出生点 ----------
 	for x in range(cx - 3, cx + 4):
 		for y in range(0, surface[cx] + 20):
 			var t := T[y * width + x]
@@ -197,6 +238,7 @@ static func generate(width: int, height: int, seed_value: int) -> WorldData:
 
 	w.tiles = T
 	w.walls = WL
+	w.liquid = LQ
 	w.rebuild_sky()
 	return w
 
@@ -209,6 +251,47 @@ static func _noise(s: int, freq: float, octaves: int) -> FastNoiseLite:
 	n.fractal_type = FastNoiseLite.FRACTAL_FBM if octaves > 1 else FastNoiseLite.FRACTAL_NONE
 	n.fractal_octaves = octaves
 	return n
+
+
+## 往下找到洞穴地面，如果这一段地面两头都被石壁挡住（是个"盆"），就往里面灌液体，最多 rows 层
+static func _fill_basin(T: PackedByteArray, LQ: PackedByteArray, width: int, x: int, y: int, typ: int, rows: int) -> void:
+	var idx := y * width + x
+	var n := T.size()
+	var k := 0
+	while k < 30 and idx + width < n and not (T[idx] == TileDB.AIR and T[idx + width] != TileDB.AIR):
+		idx += width
+		k += 1
+	if k >= 30 or idx + width >= n or not TileDB.is_solid(T[idx + width]):
+		return
+	var full := (typ << 4) | WorldData.LIQ_MAX
+	for r in rows:
+		var row := idx - r * width
+		if row < width:
+			return
+		# 向左右找边界：每一格都得是空气，下面得是实心或已经灌满的液体
+		var l := row
+		var ok := true
+		while true:
+			var c := l - 1
+			if TileDB.is_solid(T[c]):
+				break
+			if T[c] != TileDB.AIR or not (TileDB.is_solid(T[c + width]) or LQ[c + width] == full) or row - c > 40:
+				ok = false
+				break
+			l = c
+		var rr := row
+		while ok:
+			var c := rr + 1
+			if TileDB.is_solid(T[c]):
+				break
+			if T[c] != TileDB.AIR or not (TileDB.is_solid(T[c + width]) or LQ[c + width] == full) or c - row > 40:
+				ok = false
+				break
+			rr = c
+		if not ok or T[row] != TileDB.AIR:
+			return
+		for c in range(l, rr + 1):
+			LQ[c] = full
 
 
 ## 随机游走撒一团团矿石，只替换 replace 列表里的图块

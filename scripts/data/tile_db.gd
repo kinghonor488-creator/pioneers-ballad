@@ -18,6 +18,7 @@ enum {
 	TRUNK, LEAVES, PLANKS, STONE_BRICK, GLASS,
 	TORCH, WORKBENCH, FURNACE, ANVIL, RELIC_CHEST,
 	MUSHROOM, CRYSTAL, BASALT, EMBER_ORE, BEDROCK,
+	OBSIDIAN,  # 新图块只能加在这里（COUNT 前面），否则旧存档里的图块编号会错位
 	COUNT,
 }
 
@@ -57,6 +58,7 @@ const DEFS := {
 	CRYSTAL: {"name": "灵晶簇", "solid": false, "hardness": 0.3, "drop": "crystal_shard", "color": Color(0.45, 1.0, 0.9), "art": "crystal", "light": 4.0, "light_color": Color(0.4, 1.0, 0.9), "support": "floor"},
 	BASALT: {"name": "玄武岩", "hardness": 2.4, "tier": 3, "drop": "basalt", "color": Color(0.21, 0.19, 0.23), "art": "basalt"},
 	EMBER_ORE: {"name": "熔晶矿", "hardness": 3.5, "tier": 5, "drop": "ember_ore", "color": Color(1.0, 0.45, 0.12), "art": "ore", "base": BASALT, "light": 2.5, "light_color": Color(1.0, 0.5, 0.2)},
+	OBSIDIAN: {"name": "黑曜石", "hardness": 3.0, "tier": 3, "drop": "obsidian", "color": Color(0.2, 0.13, 0.3), "art": "obsidian"},
 	BEDROCK: {"name": "深渊基岩", "hardness": 999.0, "tier": UNBREAKABLE_TIER, "drop": "", "color": Color(0.09, 0.08, 0.11), "art": "bedrock"},
 }
 

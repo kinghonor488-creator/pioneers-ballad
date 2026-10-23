@@ -4,7 +4,7 @@ extends Node
 ##
 ## 每次计算摄像机附近一块区域（屏幕 + 四周各 MARGIN 格），每个图块得到一个 RGB 亮度：
 ##   1. 光源：天空直射（从世界顶部往下，碰到第一个实心方块之前都算露天）、
-##      发光图块（火把、灵晶簇、熔炉……）、会动的光源（玩家、发光的怪、法术弹、爆炸）
+##      发光图块（火把、灵晶簇、熔炉……）、熔岩、会动的光源（玩家、发光的怪、法术弹、爆炸）
 ##   2. 扩散：横向、纵向来回扫几遍，每走一格亮度乘以衰减系数。
 ##      空气里衰减慢，实心方块里衰减快——所以光能照进洞口、照亮洞壁表面，但照不透厚岩层。
 ##      光是彩色的：灵晶簇是青色的，火把是暖黄色的，月光是蓝色的。
@@ -16,6 +16,8 @@ const MARGIN := 12
 const AIR_DECAY := 0.82
 const NONSOLID_DECAY := 0.78    ## 树叶、火把这类不挡路的图块
 const SOLID_DECAY := 0.55
+const WATER_DECAY := 0.72       ## 水会让光暗得快一点
+const LAVA_LIGHT := Color(1.0, 0.45, 0.15)
 const PASSES := 2
 const MAX_HZ := 30.0
 const SHADER := preload("res://shaders/lighting.gdshader")
@@ -124,18 +126,8 @@ func snapshot(center: Vector2 = Vector2.INF, view: Vector2 = Vector2.ZERO) -> Di
 	var y0 := floori((center.y - view.y * 0.5) / 16.0) - MARGIN
 	var cols := ceili(view.x / 16.0) + MARGIN * 2 + 1
 	var rows := ceili(view.y / 16.0) + MARGIN * 2 + 1
-	var tiles := PackedByteArray()
-	for y in range(y0, y0 + rows):
-		if y < 0 or y >= w.height:
-			var row := PackedByteArray()
-			row.resize(cols)
-			row.fill(TileDB.BEDROCK if y >= w.height else TileDB.AIR)
-			tiles.append_array(row)
-		elif x0 >= 0 and x0 + cols <= w.width:
-			tiles.append_array(w.tiles.slice(y * w.width + x0, y * w.width + x0 + cols))
-		else:
-			for x in range(x0, x0 + cols):
-				tiles.append(w.get_tile(x, y))
+	var tiles := _slice(w, w.tiles, x0, y0, cols, rows, TileDB.AIR, TileDB.BEDROCK)
+	var liquid := _slice(w, w.liquid, x0, y0, cols, rows, 0, 0)
 	var sky := PackedInt32Array()
 	sky.resize(cols)
 	for i in cols:
@@ -148,7 +140,25 @@ func snapshot(center: Vector2 = Vector2.INF, view: Vector2 = Vector2.ZERO) -> Di
 			if not s.is_empty():
 				var pos: Vector2 = s[0]
 				sources.append([floori(pos.x / 16.0), floori(pos.y / 16.0), s[1], float(s[2])])
-	return {"x0": x0, "y0": y0, "w": cols, "h": rows, "tiles": tiles, "sky": sky, "sun": sun, "sources": sources}
+	return {"x0": x0, "y0": y0, "w": cols, "h": rows, "tiles": tiles, "liquid": liquid, "sky": sky, "sun": sun, "sources": sources}
+
+
+## 从世界数组里切出一块矩形区域；世界上面用 above 填，下面用 below 填，左右两边用基岩/0 填
+static func _slice(w: WorldData, arr: PackedByteArray, x0: int, y0: int, cols: int, rows: int, above: int, below: int) -> PackedByteArray:
+	var out := PackedByteArray()
+	var side := below
+	for y in range(y0, y0 + rows):
+		if y < 0 or y >= w.height:
+			var row := PackedByteArray()
+			row.resize(cols)
+			row.fill(below if y >= w.height else above)
+			out.append_array(row)
+		elif x0 >= 0 and x0 + cols <= w.width:
+			out.append_array(arr.slice(y * w.width + x0, y * w.width + x0 + cols))
+		else:
+			for x in range(x0, x0 + cols):
+				out.append(arr[y * w.width + x] if x >= 0 and x < w.width else side)
+	return out
 
 
 # ---------------------------------------------------------------- 后台线程：传播
@@ -161,6 +171,7 @@ func compute(job: Dictionary) -> void:
 	var y0: int = job.y0
 	var n := W * H
 	var tiles: PackedByteArray = job.tiles
+	var liquid: PackedByteArray = job.liquid
 	var r := PackedFloat32Array()
 	var g := PackedFloat32Array()
 	var b := PackedFloat32Array()
@@ -182,6 +193,15 @@ func compute(job: Dictionary) -> void:
 			r[i] = c.r * s
 			g[i] = c.g * s
 			b[i] = c.b * s
+		var lq := liquid[i]
+		if lq != 0:
+			if (lq >> 4) == WorldData.LIQ_LAVA:
+				var k := 0.5 + 0.06 * (lq & 15)
+				r[i] = maxf(r[i], LAVA_LIGHT.r * k)
+				g[i] = maxf(g[i], LAVA_LIGHT.g * k)
+				b[i] = maxf(b[i], LAVA_LIGHT.b * k)
+			else:
+				decay[i] = WATER_DECAY
 	# 光源：天空
 	var sun_c: Color = job.sun
 	var sky: PackedInt32Array = job.sky

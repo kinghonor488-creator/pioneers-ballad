@@ -13,6 +13,9 @@ const NIGHT_SUN := Color(0.2, 0.23, 0.38)      ## 月光：偏蓝
 const DAWN_SUN := Color(1.0, 0.72, 0.55)       ## 日出日落：偏橙
 const RARITY_GOLD := Color(1.0, 0.8, 0.35)
 const AUTOSAVE_INTERVAL := 300.0  ## 每 5 分钟自动保存一次
+const BASE_BREATH := 10.0         ## 在水下能憋气多少秒
+const LIQUID_TICK := 0.05         ## 液体每秒流动 20 步
+const LAVA_DAMAGE := 30
 const TITLE_SCENE := "res://scenes/title.tscn"
 
 @export var world_width := 4200
@@ -29,6 +32,10 @@ var sky: SkyBackdrop
 var cursor: TileCursor
 var combat: Combat
 var lighting: Lighting
+var liquids: LiquidSim
+var breath := BASE_BREATH
+var _liquid_timer := 0.0
+var _drown_timer := 1.0
 var rng := RandomNumberGenerator.new()
 var ready_done := false
 var world_name := "未命名世界"
@@ -107,6 +114,7 @@ func _ready() -> void:
 		world = WorldGen.generate(world_width, world_height, world_seed)
 		print("[世界] 生成完成 %d×%d 种子=%d 用时 %d 毫秒" % [world_width, world_height, world_seed, Time.get_ticks_msec() - t0])
 
+	liquids = LiquidSim.new(world)
 	lighting = Lighting.new()
 	renderer = WorldRenderer.new()
 	add_child(renderer)
@@ -229,7 +237,13 @@ func _process(delta: float) -> void:
 	else:
 		_regen(delta)
 		_handle_use(delta)
+		_liquid_effects(delta)
+	_liquid_timer += delta
+	if _liquid_timer >= LIQUID_TICK:
+		_liquid_timer = fmod(_liquid_timer, LIQUID_TICK)
+		liquids.step()
 	renderer.update_view(player.center(), _view_size())
+	renderer.flush_liquids()
 	_update_ambient()
 	_shake = move_toward(_shake, 0.0, 25.0 * delta)
 	camera.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake if _shake > 0.0 else Vector2.ZERO
@@ -296,7 +310,7 @@ func _tick_buffs(delta: float) -> void:
 
 func recalc_stats() -> void:
 	var s := {"move": 0.0, "jump": 0.0, "mine": 0.0, "reach": 0.0, "light": 0.0, "nofall": false, "maxhp": 0.0,
-		"defense": 0.0, "damage": 0.0, "crit": 0.0, "mana": 0.0, "speed": 0.0}
+		"defense": 0.0, "damage": 0.0, "crit": 0.0, "mana": 0.0, "speed": 0.0, "breath": 0.0, "lavares": 0.0}
 	for a in inventory.accessories:
 		if a != null:
 			_merge_effects(s, ItemDB.get_def(a.id).get("effects", {}))
@@ -359,6 +373,9 @@ func _handle_use(delta: float) -> void:
 			use_consumable(inventory.selected)
 	elif cat == "weapon":
 		combat.use_weapon(item, get_global_mouse_position())
+	elif d.has("bucket"):
+		if Input.is_action_just_pressed("use"):
+			use_bucket(t, inventory.selected)
 	elif cat == "throwable":
 		if _use_cooldown <= 0.0:
 			throw_item(inventory.selected, get_global_mouse_position())
@@ -533,6 +550,9 @@ func place_item(t: Vector2i, slot: int) -> bool:
 		return false
 	if TileDB.is_solid(tile_id) and player.overlaps_tile(t):
 		return false
+	if not TileDB.is_solid(tile_id) and world.liquid_type(t.x, t.y) != WorldData.LIQ_NONE:
+		hud.hint("不能放在液体里。")
+		return false
 	if not has_support(t, tile_id):
 		return false
 	world.set_tile(t.x, t.y, tile_id)
@@ -634,6 +654,79 @@ func give(inst: Dictionary) -> void:
 		hud.notify_item(inst, got)
 	if left > 0:
 		hud.hint("背包满了！%s ×%d 掉进了虚空。" % [ItemDB.display_name(inst), left])
+
+
+# ---------------------------------------------------------------- 液体
+
+func max_breath() -> float:
+	return BASE_BREATH * (1.0 + float(stats.get("breath", 0.0)))
+
+
+## 憋气、溺水、熔岩烫伤
+func _liquid_effects(delta: float) -> void:
+	var head := player.position + Vector2(Player.W * 0.5, 5.0)
+	if world.liquid_type_px(head) == WorldData.LIQ_WATER:
+		breath -= delta
+		if breath <= 0.0:
+			breath = 0.0
+			_drown_timer -= delta
+			if _drown_timer <= 0.0:
+				_drown_timer = 1.0
+				damage(10, "溺水")
+	else:
+		breath = minf(max_breath(), breath + delta * 5.0)
+		_drown_timer = 1.0
+	breath = minf(breath, max_breath())
+	var feet := player.position + Vector2(Player.W * 0.5, Player.H - 2.0)
+	if (player.in_liquid == WorldData.LIQ_LAVA or world.liquid_type_px(feet) == WorldData.LIQ_LAVA) and player.invuln <= 0.0:
+		var dmg := roundi(LAVA_DAMAGE * (1.0 - clampf(float(stats.get("lavares", 0.0)), 0.0, 1.0)))
+		player.invuln = 0.6
+		if dmg > 0:
+			damage(dmg, "熔岩")
+
+
+## 桶：空桶对准液体装起来；满桶对准空地倒出去
+func use_bucket(t: Vector2i, slot: int) -> bool:
+	var item = inventory.slots[slot]
+	if item == null or not in_reach(t, item):
+		return false
+	var kind := String(ItemDB.get_def(item.id).bucket)
+	if kind == "empty":
+		var typ := world.liquid_type(t.x, t.y)
+		if typ == WorldData.LIQ_NONE:
+			hud.hint("这里没有液体。")
+			return false
+		# 从这一格和周围同种液体里一共舀 8 份
+		var got := 0
+		for r in 3:
+			for dy in range(-r, r + 1):
+				for dx in range(-r, r + 1):
+					var q := t + Vector2i(dx, dy)
+					if got < WorldData.LIQ_MAX and world.liquid_type(q.x, q.y) == typ:
+						var take := mini(world.liquid_amount(q.x, q.y), WorldData.LIQ_MAX - got)
+						world.set_liquid(q.x, q.y, typ, world.liquid_amount(q.x, q.y) - take)
+						got += take
+						liquids.activate_around(q.x, q.y)
+		if got < 4:
+			world.set_liquid(t.x, t.y, typ, got)   # 太少了，放回去
+			hud.hint("这里的液体太少了，装不满一桶。")
+			return false
+		inventory.consume_slot(slot, 1)
+		give(ItemDB.make("water_bucket" if typ == WorldData.LIQ_WATER else "lava_bucket", 1))
+	else:
+		var typ := WorldData.LIQ_WATER if kind == "water" else WorldData.LIQ_LAVA
+		if world.get_tile(t.x, t.y) != TileDB.AIR or not world.in_bounds(t.x, t.y):
+			hud.hint("这里倒不了。")
+			return false
+		var cur := world.liquid_type(t.x, t.y)
+		if cur != WorldData.LIQ_NONE and cur != typ:
+			hud.hint("这里已经有别的液体了。")
+			return false
+		world.set_liquid(t.x, t.y, typ, WorldData.LIQ_MAX)
+		liquids.activate_around(t.x, t.y)
+		inventory.consume_slot(slot, 1)
+		give(ItemDB.make("empty_bucket", 1))
+	return true
 
 
 # ---------------------------------------------------------------- 生命

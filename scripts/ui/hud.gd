@@ -391,6 +391,7 @@ func _draw() -> void:
 	_draw_status(vs)
 	_draw_messages(vs)
 	_draw_boss_bar(vs)
+	_draw_breath()
 	if _banner_t > 0.0:
 		var c := _banner_color
 		c.a = clampf(_banner_t, 0.0, 1.0)
@@ -506,6 +507,24 @@ func _draw_status(vs: Vector2) -> void:
 		y += 18.0
 	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))
+
+
+## 在水下憋气时，玩家头顶显示一排气泡
+func _draw_breath() -> void:
+	var mx: float = game.max_breath()
+	if game.breath >= mx or game.dead:
+		return
+	var p: Player = game.player
+	var head := p.get_global_transform_with_canvas() * Vector2(Player.W * 0.5, -10.0)
+	var n := 10
+	var left := ceili(game.breath / mx * n)
+	for i in n:
+		var pos := head + Vector2((i - (n - 1) * 0.5) * 11.0, 0)
+		if i < left:
+			draw_circle(pos, 4.5, Color(0.6, 0.85, 1.0, 0.9))
+			draw_circle(pos + Vector2(-1.5, -1.5), 1.2, Color.WHITE)
+		else:
+			draw_arc(pos, 4.5, 0, TAU, 12, Color(0.6, 0.85, 1.0, 0.35), 1.0)
 
 
 func _draw_boss_bar(vs: Vector2) -> void:

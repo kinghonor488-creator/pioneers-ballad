@@ -34,6 +34,32 @@ static func build_wall_atlas() -> Image:
 	return img
 
 
+## 液体图集：第 1 行是水，第 2 行是熔岩；第 n 列是"有 n 份"的样子（每份高 2 像素），
+## 第 0 列是"上面还有液体"的满格（没有水面那条亮线）
+static func build_liquid_atlas() -> Image:
+	var img := Image.create_empty(TS * (WorldData.LIQ_MAX + 1), TS * 2, false, Image.FORMAT_RGBA8)
+	var colors := [Color(0.22, 0.48, 0.95, 0.55), Color(1.0, 0.42, 0.1, 0.95)]
+	for row in 2:
+		var c: Color = colors[row]
+		var rng := _rng(4000 + row)
+		for amt in range(0, WorldData.LIQ_MAX + 1):
+			var o := Vector2i(amt * TS, row * TS)
+			var top := TS - amt * 2 if amt > 0 else 0
+			for y in range(top, TS):
+				for x in TS:
+					var k := c
+					if row == 1:
+						k = _jitter(c, rng, 0.08)
+						if rng.randf() < 0.08:
+							k = Color(1.0, 0.85, 0.35, 0.95)
+					else:
+						k = Color(c.r, c.g, c.b, c.a + rng.randf_range(-0.04, 0.04))
+					if y == top and amt > 0:
+						k = Color(0.7, 0.85, 1.0, 0.75) if row == 0 else Color(1.0, 0.8, 0.35, 1.0)
+					_px(img, o, x, y, k)
+	return img
+
+
 ## 道具图标（16×16）。能放置的道具直接用对应图块的样子。
 static func icon(id: String) -> Texture2D:
 	if _icon_cache.has(id):
@@ -240,6 +266,13 @@ static func paint_tile(img: Image, id: int, o: Vector2i, rng: RandomNumberGenera
 					x = clampi(x + rng.randi_range(-1, 1), 0, TS - 1)
 				if rng.randf() < 0.6:
 					_px(img, o, x, y, c.darkened(0.4))
+		"obsidian":
+			_noise_fill(img, o, c, rng, 0.03)
+			for i in 3:
+				var sx := rng.randi_range(1, 12)
+				var sy := rng.randi_range(1, 12)
+				_line(img, o, Vector2i(sx, sy + 2), Vector2i(sx + 2, sy), Color(0.55, 0.4, 0.75))
+			_speckle(img, o, c.darkened(0.4), rng, 6)
 		"bedrock":
 			_noise_fill(img, o, c, rng, 0.03)
 			for i in 3:
@@ -453,6 +486,23 @@ static func paint_icon(img: Image, shape: String, c: Color) -> void:
 			_disc(img, o, Vector2(11, 8), 2.0, c)
 			_px(img, o, 4, 7, Color.WHITE)
 			_px(img, o, 10, 7, Color.WHITE)
+		"bucket":
+			var metal := Color(0.7, 0.72, 0.78)
+			for y in range(5, 15):
+				var inset := (y - 5) / 4
+				_rect(img, o, 3 + inset, y, 12 - inset, y, metal if y % 3 != 0 else metal.darkened(0.15))
+			_rect(img, o, 3, 5, 12, 5, metal.lightened(0.2))
+			if c.a > 0.0:
+				_rect(img, o, 4, 6, 11, 7, c)
+				_px(img, o, 6, 6, c.lightened(0.4))
+			_line(img, o, Vector2i(3, 5), Vector2i(7, 1), metal.darkened(0.3))
+			_line(img, o, Vector2i(12, 5), Vector2i(8, 1), metal.darkened(0.3))
+		"snorkel":
+			_rect(img, o, 2, 7, 9, 11, Color(0.25, 0.25, 0.3))
+			_rect(img, o, 3, 8, 8, 10, c)
+			_px(img, o, 4, 8, Color.WHITE)
+			_rect(img, o, 11, 2, 12, 11, Color(0.95, 0.75, 0.2))
+			_rect(img, o, 9, 10, 11, 11, Color(0.95, 0.75, 0.2))
 		"offering":
 			# 一个陶碗，里面盛着冒光的泥核
 			_rect(img, o, 2, 10, 13, 12, Color(0.62, 0.36, 0.22))

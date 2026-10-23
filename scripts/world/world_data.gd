@@ -5,11 +5,17 @@ extends RefCounted
 
 signal tile_changed(x: int, y: int)
 
+## 液体：每格 1 字节，高 4 位是种类，低 4 位是量（0~8，8 = 满格）
+const LIQ_MAX := 8
+enum { LIQ_NONE, LIQ_WATER, LIQ_LAVA }
+
 var width := 0
 var height := 0
 var seed_value := 0
 var tiles := PackedByteArray()
 var walls := PackedByteArray()
+var liquid := PackedByteArray()
+var liquid_dirty: Array = []        ## 液体变了的格子下标，渲染器每帧取走
 var surface := PackedInt32Array()  ## 每一列生成时的地表高度
 var sky_y := PackedInt32Array()    ## 每一列从上往下第一个实心方块的 y（它上面都能被天光直射）
 var spawn := Vector2i.ZERO          ## 出生点（脚下方块的上方一格）
@@ -23,6 +29,8 @@ func _init(w: int = 0, h: int = 0) -> void:
 	tiles.fill(0)
 	walls.resize(w * h)
 	walls.fill(0)
+	liquid.resize(w * h)
+	liquid.fill(0)
 	surface.resize(w)
 
 
@@ -46,7 +54,11 @@ func get_wall(x: int, y: int) -> int:
 func set_tile(x: int, y: int, id: int) -> void:
 	if not in_bounds(x, y):
 		return
-	tiles[y * width + x] = id
+	var i := y * width + x
+	tiles[i] = id
+	if id != TileDB.AIR and liquid.size() == tiles.size() and liquid[i] != 0:
+		liquid[i] = 0          # 方块会把液体挤掉
+		liquid_dirty.append(i)
 	if sky_y.size() == width:
 		if TileDB.is_solid(id):
 			if y < sky_y[x]:
@@ -70,6 +82,42 @@ func _scan_sky(x: int, from_y: int) -> int:
 			return y
 		i += width
 	return height
+
+
+func liquid_type(x: int, y: int) -> int:
+	if x < 0 or y < 0 or x >= width or y >= height:
+		return LIQ_NONE
+	return liquid[y * width + x] >> 4
+
+
+func liquid_amount(x: int, y: int) -> int:
+	if x < 0 or y < 0 or x >= width or y >= height:
+		return 0
+	return liquid[y * width + x] & 15
+
+
+## 像素坐标处是什么液体（玩家游泳、受熔岩伤害用）
+func liquid_type_px(p: Vector2) -> int:
+	var x := floori(p.x / 16.0)
+	var y := floori(p.y / 16.0)
+	var t := liquid_type(x, y)
+	if t == LIQ_NONE:
+		return LIQ_NONE
+	# 没满的格子，液面以上不算泡在液体里
+	var surface_px := (y + 1) * 16.0 - liquid_amount(x, y) * 2.0
+	if liquid_type(x, y - 1) == LIQ_NONE and p.y < surface_px:
+		return LIQ_NONE
+	return t
+
+
+func set_liquid(x: int, y: int, type: int, amount: int) -> void:
+	if not in_bounds(x, y):
+		return
+	var i := y * width + x
+	var v := 0 if amount <= 0 or type == LIQ_NONE else (type << 4) | mini(amount, LIQ_MAX)
+	if liquid[i] != v:
+		liquid[i] = v
+		liquid_dirty.append(i)
 
 
 func is_solid(x: int, y: int) -> bool:

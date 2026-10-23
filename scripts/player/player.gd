@@ -28,6 +28,7 @@ var mana := 40.0
 var max_mana := 40
 var attack_anim := 0.0     ## >0 时正在挥动武器（攻击时面朝鼠标）
 var light_strength := 0.4  ## 玩家身上的光（饰品、萤光药水会加强）
+var in_liquid := 0         ## 身体泡在什么液体里（WorldData.LIQ_*）
 
 var _coyote := 0.0
 var _jump_buffer := 0.0
@@ -47,7 +48,13 @@ func light_source() -> Array:
 
 ## dir: -1..1 左右输入
 func step(dt: float, dir: float, jump_pressed: bool, jump_held: bool) -> void:
-	velocity.x = move_toward(velocity.x, dir * RUN_SPEED * move_mult, (GROUND_ACCEL if on_ground else AIR_ACCEL) * dt)
+	in_liquid = world.liquid_type_px(center())
+	var speed_k := 1.0
+	if in_liquid == WorldData.LIQ_WATER:
+		speed_k = 0.6
+	elif in_liquid == WorldData.LIQ_LAVA:
+		speed_k = 0.4
+	velocity.x = move_toward(velocity.x, dir * RUN_SPEED * move_mult * speed_k, (GROUND_ACCEL if on_ground else AIR_ACCEL) * dt)
 	if dir != 0.0 and attack_anim <= 0.0:
 		facing = 1 if dir > 0.0 else -1
 	_coyote = COYOTE if on_ground else maxf(0.0, _coyote - dt)
@@ -58,9 +65,16 @@ func step(dt: float, dir: float, jump_pressed: bool, jump_held: bool) -> void:
 		_coyote = 0.0
 		on_ground = false
 	var g := GRAVITY
-	if velocity.y < 0.0 and not jump_held:
+	var max_fall := MAX_FALL
+	if in_liquid != WorldData.LIQ_NONE:
+		# 在液体里：下沉得慢，按住跳跃键往上游
+		g *= 0.3
+		max_fall = 140.0
+		if jump_held:
+			velocity.y = maxf(velocity.y - 1100.0 * dt, -190.0)
+	elif velocity.y < 0.0 and not jump_held:
 		g *= 2.2  # 松开跳跃键就跳得矮一些
-	velocity.y = minf(velocity.y + g * dt, MAX_FALL)
+	velocity.y = minf(velocity.y + g * dt, max_fall)
 
 	var was_ground := on_ground
 	_move_x(velocity.x * dt)
@@ -75,8 +89,8 @@ func step(dt: float, dir: float, jump_pressed: bool, jump_held: bool) -> void:
 		if tiles > SAFE_FALL_TILES and not no_fall:
 			landed_hard.emit(int((tiles - SAFE_FALL_TILES) * 6.0))
 		_fall_peak = position.y
-	if on_ground:
-		_fall_peak = position.y
+	if on_ground or in_liquid != WorldData.LIQ_NONE:
+		_fall_peak = position.y   # 掉进水里不会摔伤
 
 	_walk_t = _walk_t + dt * absf(velocity.x) * 0.08 if on_ground and absf(velocity.x) > 10.0 else 0.0
 	hurt_flash = maxf(0.0, hurt_flash - dt)

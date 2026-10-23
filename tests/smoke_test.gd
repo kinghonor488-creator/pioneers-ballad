@@ -206,9 +206,17 @@ func _test_game() -> void:
 	# 放回去
 	inv.slots[5] = ItemDB.make("dirt", 3)
 	main.inventory.selected = 5
-	var spot := feet + Vector2i(2, 0)
-	while main.world.get_tile(spot.x, spot.y) != TileDB.AIR and spot.y > 0:
-		spot.y -= 1
+	# 在玩家旁边找一个"空气、下面是实心方块、不和玩家重叠"的格子
+	var spot := Vector2i(-1, -1)
+	for dx in [2, -2, 3, -3, 4, -4]:
+		for y in range(feet.y + 2, feet.y - 4, -1):
+			var c := Vector2i(feet.x + dx, y)
+			if main.world.get_tile(c.x, c.y) == TileDB.AIR and main.world.is_solid(c.x, c.y + 1) \
+					and main.world.liquid_type(c.x, c.y) == 0 and not p.overlaps_tile(c):
+				spot = c
+				break
+		if spot.x >= 0:
+			break
 	check(main.place_item(spot, 5), "能放置泥土")
 	check(main.world.get_tile(spot.x, spot.y) == TileDB.DIRT and int(inv.slots[5].count) == 2, "放置后背包数量减少")
 	check(not main.place_item(Vector2i(spot.x + 40, spot.y), 5), "太远的地方放不了")
@@ -251,6 +259,7 @@ func _test_game() -> void:
 	check(main.world.get_tile(bt.x, bt.y) == TileDB.AIR, "炸弹能炸掉方块")
 
 	_test_lighting(main)
+	_test_liquids(main)
 	await _test_combat(main)
 	await _test_bosses(main)
 
@@ -334,6 +343,170 @@ func _test_lighting(main: Node2D) -> void:
 	main._update_ambient()
 
 
+## 在地下挖一个封闭的石头盒子（内部 iw×ih 是空的），返回内部左上角
+func _make_box(w: WorldData, x0: int, y0: int, iw: int, ih: int) -> Vector2i:
+	for y in range(y0 - 1, y0 + ih + 1):
+		for x in range(x0 - 1, x0 + iw + 1):
+			var inside := x >= x0 and x < x0 + iw and y >= y0 and y < y0 + ih
+			w.set_tile(x, y, TileDB.AIR if inside else TileDB.STONE)
+			w.set_liquid(x, y, 0, 0)
+	return Vector2i(x0, y0)
+
+
+func _run_liquids(sim: LiquidSim, max_steps: int) -> int:
+	var n := 0
+	while not sim.active.is_empty() and n < max_steps:
+		sim.step()
+		n += 1
+	return n
+
+
+func _test_liquids(main: Node2D) -> void:
+	print("== 液体 ==")
+	var w: WorldData = main.world
+	var sim: LiquidSim = main.liquids
+	var p: Player = main.player
+	var inv: Inventory = main.inventory
+	# 生成
+	var water := 0
+	var lava := 0
+	var lava_high := 0
+	var floating := 0
+	for i in w.liquid.size():
+		var v := w.liquid[i]
+		if v == 0:
+			continue
+		if (v >> 4) == WorldData.LIQ_WATER:
+			water += 1
+		else:
+			lava += 1
+			if i / w.width < int(w.layers.cavern):
+				lava_high += 1
+		var below := i + w.width
+		if below < w.liquid.size() and w.tiles[below] == TileDB.AIR and w.liquid[below] == 0:
+			floating += 1
+	check(water > 0 and lava > 0, "世界里有水（%d 格）和熔岩（%d 格）" % [water, lava])
+	check(lava_high == 0, "熔岩只出现在洞穴层以下")
+	check(floating == 0, "生成的液体都有东西托着，不会悬空")
+	check(sim.active.is_empty(), "生成好的液体是静止的（不占用模拟时间）")
+
+	# 流动：往盒子左上角倒 2 桶水
+	sim.active = {}
+	var box := _make_box(w, w.spawn.x + 40, int(w.layers.rock) + 10, 12, 6)
+	w.set_liquid(box.x, box.y, WorldData.LIQ_WATER, 8)
+	w.set_liquid(box.x + 1, box.y, WorldData.LIQ_WATER, 8)
+	sim.activate_around(box.x, box.y)
+	var steps := _run_liquids(sim, 600)
+	var total := sim.total_amount(box.x, box.y, box.x + 11, box.y + 5)
+	check(total == 16, "流动时液体总量不变（%d）" % total)
+	var bottom_ok := true
+	for x in range(box.x, box.x + 12):
+		bottom_ok = bottom_ok and w.liquid_amount(x, box.y + 5) >= 1
+	check(bottom_ok, "水流下去铺满了盒子底部")
+	check(w.liquid_amount(box.x, box.y) == 0, "上面不再悬着水")
+	check(sim.active.is_empty(), "流完之后静止下来（%d 步）" % steps)
+
+	# 水 + 熔岩 → 黑曜石
+	var box2 := _make_box(w, w.spawn.x + 60, int(w.layers.rock) + 10, 6, 3)
+	w.set_liquid(box2.x, box2.y + 2, WorldData.LIQ_WATER, 8)
+	w.set_liquid(box2.x + 5, box2.y + 2, WorldData.LIQ_LAVA, 8)
+	sim.activate_around(box2.x, box2.y + 2)
+	sim.activate_around(box2.x + 5, box2.y + 2)
+	_run_liquids(sim, 600)
+	var obs := 0
+	for y in range(box2.y, box2.y + 3):
+		for x in range(box2.x, box2.x + 6):
+			if w.get_tile(x, y) == TileDB.OBSIDIAN:
+				obs += 1
+	check(obs > 0, "水碰到熔岩会凝固成黑曜石（%d 块）" % obs)
+
+	# 桶、游泳、憋气、熔岩伤害：把玩家放进一个大水池
+	var pool := _make_box(w, w.spawn.x + 80, int(w.layers.rock) + 10, 8, 8)
+	for y in range(pool.y, pool.y + 8):
+		for x in range(pool.x, pool.x + 8):
+			w.set_liquid(x, y, WorldData.LIQ_WATER, 8)
+	sim.active = {}
+	p.teleport(Vector2(pool.x * 16 + 40, pool.y * 16 + 40))
+	var cell := pool + Vector2i(1, 4)
+	inv.slots[9] = ItemDB.make("empty_bucket", 2)
+	check(main.use_bucket(cell, 9) and inv.count_of("water_bucket") == 1, "空桶能装水")
+	inv.slots[9] = ItemDB.make("lava_bucket", 1)
+	var air_spot := Vector2i(cell.x, cell.y)
+	check(not main.use_bucket(air_spot, 9) or w.liquid_type(air_spot.x, air_spot.y) != WorldData.LIQ_WATER, "不能把熔岩倒进水里")
+	inv.slots[9] = null
+	_run_liquids(sim, 300)
+	# 游泳
+	p.velocity = Vector2.ZERO
+	for i in 30:
+		p.step(1.0 / 60.0, 0.0, false, false)
+	check(p.in_liquid == WorldData.LIQ_WATER and p.velocity.y <= 140.0, "在水里下沉得很慢（%.0f）" % p.velocity.y)
+	var y_before := p.position.y
+	for i in 30:
+		p.step(1.0 / 60.0, 0.0, false, true)
+	check(p.position.y < y_before, "按住跳跃键能往上游")
+	# 憋气
+	p.teleport(Vector2(pool.x * 16 + 40, pool.y * 16 + 60))
+	p.step(1.0 / 60.0, 0.0, false, false)
+	main.breath = main.max_breath()
+	p.hp = 100.0
+	for i in 14:
+		main._liquid_effects(1.0)
+	check(main.breath == 0.0 and p.hp < 100.0, "憋气用完后会溺水（剩 %.0f 生命）" % p.hp)
+	main.buffs["水息"] = {"effects": {"breath": 99.0}, "time": 300.0}
+	main.recalc_stats()
+	main.breath = main.max_breath()
+	p.hp = 100.0
+	for i in 14:
+		main._liquid_effects(1.0)
+	check(p.hp == 100.0, "喝了水息药水可以在水下呼吸")
+	main.buffs.erase("水息")
+	main.recalc_stats()
+	# 熔岩
+	for y in range(pool.y, pool.y + 8):
+		for x in range(pool.x, pool.x + 8):
+			w.set_liquid(x, y, WorldData.LIQ_LAVA, 8)
+	p.step(1.0 / 60.0, 0.0, false, false)
+	p.invuln = 0.0
+	p.hp = 100.0
+	main._liquid_effects(0.1)
+	check(p.in_liquid == WorldData.LIQ_LAVA and is_equal_approx(p.hp, 100.0 - main.LAVA_DAMAGE), "熔岩会烫伤（-%d）" % main.LAVA_DAMAGE)
+	inv.accessories[2] = ItemDB.make("magma_charm")
+	main.recalc_stats()
+	p.invuln = 0.0
+	p.hp = 100.0
+	main._liquid_effects(0.1)
+	check(is_equal_approx(p.hp, 91.0), "熔火护符减少 70%% 熔岩伤害（剩 %.0f）" % p.hp)
+	inv.accessories[2] = null
+	main.recalc_stats()
+	# 熔岩发光
+	main.lighting.compute_now(p.center(), GAME_VIEW)
+	var lava_px: Color = main.lighting.last_image.get_pixelv(pool + Vector2i(4, 7) - main.lighting.last_origin)
+	check(lava_px.r > 0.4 and lava_px.r > lava_px.b, "熔岩会发出橙色的光")
+	# 性能：1500 个活跃格子
+	for y in range(pool.y, pool.y + 8):
+		for x in range(pool.x, pool.x + 8):
+			w.set_liquid(x, y, 0, 0)
+	var big := _make_box(w, w.spawn.x - 120, int(w.layers.rock) + 5, 60, 30)
+	for y in range(big.y, big.y + 25):
+		for x in range(big.x, big.x + 60):
+			w.set_liquid(x, y, WorldData.LIQ_WATER, 8 if (x + y) % 3 != 0 else 3)
+			sim.activate(x, y)
+	var t0 := Time.get_ticks_usec()
+	sim.step()
+	var ms := (Time.get_ticks_usec() - t0) / 1000.0
+	print("  液体模拟一步：处理 %d 格，用时 %.1f 毫秒" % [sim.last_processed, ms])
+	check(ms < 40.0, "液体模拟足够快")
+	_run_liquids(sim, 2000)
+	check(sim.active.is_empty(), "大水池最终也会静止下来")
+	w.liquid_dirty = []
+	main.renderer.flush_liquids()
+	p.teleport(main.spawn_position())
+	for i in 30:
+		p.step(1.0 / 60.0, 0.0, false, false)
+	p.invuln = 0.0
+	p.hp = p.max_hp
+
+
 func _test_combat(main: Node2D) -> void:
 	print("== 战斗 ==")
 	var cb: Combat = main.combat
@@ -412,7 +585,7 @@ func _test_combat(main: Node2D) -> void:
 	cb.clear()
 	p.invuln = 0.0
 	var hp_before := p.hp
-	cb.spawn_hostile_shot(p.center() + Vector2(-40, 0), Vector2(300, 0), 10)
+	cb.spawn_hostile_shot(p.center() + Vector2(0, -40), Vector2(0, 300), 10)
 	for i in 20:
 		cb.physics_tick(1.0 / 60.0)
 	check(p.hp < hp_before, "敌人的火球会伤到玩家")
@@ -561,6 +734,7 @@ func _test_save_load(main: Node2D) -> void:
 	check(String(hdr.get("name", "")) == "测试世界" and int(hdr.get("width", 0)) == 600, "能读取存档头信息")
 	var data := SaveSystem.load_full(path)
 	check(not data.is_empty() and data.world.tiles == main.world.tiles and data.world.walls == main.world.walls, "图块和墙壁原样读回")
+	check(not data.is_empty() and data.world.liquid == main.world.liquid and main.world.liquid.count(0) < main.world.liquid.size(), "液体原样读回")
 	var size := FileAccess.open(path, FileAccess.READ).get_length()
 	print("  存档大小 %.1f KB（世界 600×300）" % (size / 1024.0))
 	# 记下保存时的状态，然后用一个全新的主场景把它读回来
