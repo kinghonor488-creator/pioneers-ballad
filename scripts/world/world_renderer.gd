@@ -43,6 +43,7 @@ func _make_tileset(img: Image, columns: int, rows: int = TileArt.VARIANTS, first
 	var src := TileSetAtlasSource.new()
 	src.texture = ImageTexture.create_from_image(img)
 	src.texture_region_size = Vector2i(TS, TS)
+	src.use_texture_padding = true   # 每格周围多留 1 像素，防止采样到隔壁图块的颜色（缩放时闪细线）
 	ts.add_source(src, 0)
 	for x in range(first_column, columns):
 		for y in rows:

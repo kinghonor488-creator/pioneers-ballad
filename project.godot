@@ -15,7 +15,7 @@ config/description="一个原创的 2D 沙盒冒险游戏（开发中）。"
 run/main_scene="res://scenes/title.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="PioneersBallad"
-config/features=PackedStringArray("4.7", "GL Compatibility")
+config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
 
 [display]
@@ -28,7 +28,12 @@ window/stretch/aspect="expand"
 
 [rendering]
 
+; 像素画防闪线：把 2D 物体的位置和顶点都对齐到屏幕整像素，方块之间不会因为"半个像素"闪出细线
+2d/snap/snap_2d_transforms_to_pixel=true
+2d/snap/snap_2d_vertices_to_pixel=true
+
 textures/canvas_textures/default_texture_filter=0
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
+; macOS 上用原生 Metal（旧的 OpenGL 兼容渲染器在苹果芯片上容易出现闪线之类的画面故障）
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
 environment/defaults/default_clear_color=Color(0.03, 0.03, 0.05, 1)

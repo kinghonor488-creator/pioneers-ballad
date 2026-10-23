@@ -94,5 +94,5 @@ func _draw() -> void:
 			var wx := x + cam_x * par
 			var hy := base_y - (sin(wx * 0.004 + layer) * 45.0 + sin(wx * 0.013 + layer * 3.0) * 18.0 + 60.0)
 			if hy < sz.y:
-				draw_rect(Rect2(x, maxf(hy, 0.0), 4.0, sz.y - maxf(hy, 0.0)), col)
+				draw_rect(Rect2(x, maxf(hy, 0.0), 5.0, sz.y - maxf(hy, 0.0)), col)   # 宽 5 叠着画，色块之间不留缝
 			x += 4.0

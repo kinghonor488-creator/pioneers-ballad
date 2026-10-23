@@ -268,7 +268,8 @@ func _process(delta: float) -> void:
 	renderer.flush_liquids()
 	_update_ambient()
 	_shake = move_toward(_shake, 0.0, 25.0 * delta)
-	camera.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake if _shake > 0.0 else Vector2.ZERO
+	# 震动的偏移取整到像素，避免画面落在半个像素上闪出细线
+	camera.offset = (Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake).round() if _shake > 0.5 else Vector2.ZERO
 
 
 ## 屏幕震动（Boss 重砸、爆炸等）
