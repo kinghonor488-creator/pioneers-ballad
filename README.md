@@ -5,18 +5,27 @@
 
 > 从一把燧石镐开始，开拓一整个世界。
 
+## 下载
+
+```bash
+git clone https://github.com/kinghonor488-creator/pioneers-ballad.git
+cd pioneers-ballad
+```
+
+需要先安装 [Godot 4](https://godotengine.org/)（4.7 测试通过；macOS 可以用 `brew install --cask godot`）。
+
 ## 如何运行
 
 **最简单：双击项目文件夹里的「拓荒者之歌.app」**，直接开始玩，不用打开 Godot 编辑器。
 可以把它拖到程序坞（Dock）或桌面上，以后一点就开。
-（如果 .app 不见了或者坏了，运行 `bash tools/make_launcher.sh` 重新生成。需要已经安装 Godot：`brew install --cask godot`）
+（刚下载的项目里还没有这个 .app，或者它坏了，在项目文件夹里运行 `bash tools/make_launcher.sh` 生成。仅限 macOS）
 
 想改代码时再用编辑器：打开 Godot → 导入本文件夹里的 `project.godot` → 按 **F5**。
 
-也可以在终端里运行：
+也可以在项目文件夹里用终端运行：
 
 ```bash
-godot --path /Users/sunyubo/Desktop/泰拉瑞亚
+godot --path .
 ```
 
 **窗口和全屏**：游戏启动时窗口是最大化的，画面会自动缩放填满窗口（任意分辨率、任意比例都可以）。
@@ -201,7 +210,7 @@ tools/screenshot.gd      开发用截图工具
 ## 测试
 
 ```bash
-godot --headless --path /Users/sunyubo/Desktop/泰拉瑞亚 -s res://tests/smoke_test.gd
+godot --headless --path . -s res://tests/smoke_test.gd
 ```
 
 会检查：道具/配方数据完整、世界生成结果（分层、矿石、树、宝匣、洞穴比例、基岩、出生点）、
