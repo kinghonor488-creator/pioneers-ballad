@@ -3,7 +3,8 @@ extends Node
 ## 逐格光照。
 ##
 ## 每次计算摄像机附近一块区域（屏幕 + 四周各 MARGIN 格），每个图块得到一个 RGB 亮度：
-##   1. 光源：天空直射（从世界顶部往下，碰到第一个实心方块之前都算露天）、
+##   1. 光源：天空直射（从世界顶部往下，碰到第一个实心方块之前都算露天；
+##      但到了地面以下，天光每往下一格就弱一些——挖一条竖井时，井口亮、井底暗，不会出现一整条亮线）、
 ##      发光图块（火把、灵晶簇、熔炉……）、熔岩、会动的光源（玩家、发光的怪、法术弹、爆炸）
 ##   2. 扩散：横向、纵向来回扫几遍，每走一格亮度乘以衰减系数。
 ##      空气里衰减慢，实心方块里衰减快——所以光能照进洞口、照亮洞壁表面，但照不透厚岩层。
@@ -18,6 +19,7 @@ const NONSOLID_DECAY := 0.78    ## 树叶、火把这类不挡路的图块
 const SOLID_DECAY := 0.55
 const WATER_DECAY := 0.72       ## 水会让光暗得快一点
 const LAVA_LIGHT := Color(1.0, 0.45, 0.15)
+const SHAFT_DECAY := 0.88       ## 天光在地面以下每往下一格剩多少（竖井、洞口）
 const PASSES := 2
 const MAX_HZ := 30.0
 const SHADER := preload("res://shaders/lighting.gdshader")
@@ -130,9 +132,12 @@ func snapshot(center: Vector2 = Vector2.INF, view: Vector2 = Vector2.ZERO) -> Di
 	var liquid := _slice(w, w.liquid, x0, y0, cols, rows, 0, 0)
 	var sky := PackedInt32Array()
 	sky.resize(cols)
+	var ground := PackedInt32Array()   # 每一列原本的地面高度，天光到了它下面就开始变弱
+	ground.resize(cols)
 	for i in cols:
 		var x := x0 + i
 		sky[i] = w.sky_y[x] if x >= 0 and x < w.width else 0
+		ground[i] = w.surface[x] if x >= 0 and x < w.width else 0
 	var sources := []
 	for n in game.get_tree().get_nodes_in_group("light"):
 		if n.is_inside_tree() and n.visible:
@@ -140,7 +145,7 @@ func snapshot(center: Vector2 = Vector2.INF, view: Vector2 = Vector2.ZERO) -> Di
 			if not s.is_empty():
 				var pos: Vector2 = s[0]
 				sources.append([floori(pos.x / 16.0), floori(pos.y / 16.0), s[1], float(s[2])])
-	return {"x0": x0, "y0": y0, "w": cols, "h": rows, "tiles": tiles, "liquid": liquid, "sky": sky, "sun": sun, "sources": sources}
+	return {"x0": x0, "y0": y0, "w": cols, "h": rows, "tiles": tiles, "liquid": liquid, "sky": sky, "ground": ground, "sun": sun, "sources": sources}
 
 
 ## 从世界数组里切出一块矩形区域；世界上面用 above 填，下面用 below 填，左右两边用基岩/0 填
@@ -205,13 +210,18 @@ func compute(job: Dictionary) -> void:
 	# 光源：天空
 	var sun_c: Color = job.sun
 	var sky: PackedInt32Array = job.sky
+	var ground: PackedInt32Array = job.ground
 	for x in W:
 		var top := mini(sky[x] - y0, H)
 		for y in range(0, top):
 			var i := y * W + x
-			r[i] = maxf(r[i], sun_c.r)
-			g[i] = maxf(g[i], sun_c.g)
-			b[i] = maxf(b[i], sun_c.b)
+			var below := y0 + y - ground[x]
+			var k := 1.0 if below <= 0 else pow(SHAFT_DECAY, below)
+			if k < 0.01:
+				break
+			r[i] = maxf(r[i], sun_c.r * k)
+			g[i] = maxf(g[i], sun_c.g * k)
+			b[i] = maxf(b[i], sun_c.b * k)
 	# 光源：会动的东西
 	for s in job.sources:
 		var sx: int = s[0] - x0

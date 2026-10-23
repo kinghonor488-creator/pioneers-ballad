@@ -454,6 +454,23 @@ func _test_lighting(main: Node2D) -> void:
 	L.compute_now(p.center(), GAME_VIEW)
 	var night_px := L.last_image.get_pixelv(sky_cell - L.last_origin)
 	check(night_px.r < 0.45 and night_px.b > night_px.r, "夜晚露天变暗、偏蓝（%.2f, %.2f, %.2f）" % [night_px.r, night_px.g, night_px.b])
+	# 往下挖竖井：井口亮，井底暗，不会出现一整条亮线
+	var sx := pt.x + 5
+	var ground := int(w.surface[sx])
+	var shaft_top := w.sky_y[sx]
+	var shaft_saved := {}
+	for y in range(shaft_top, shaft_top + 30):
+		shaft_saved[y] = w.get_tile(sx, y)
+		w.set_tile(sx, y, TileDB.AIR)
+	main.time_of_day = 0.5
+	main._update_ambient()
+	L.compute_now(Vector2(sx * 16, (shaft_top + 12) * 16), GAME_VIEW)
+	var near_top := L.light_at(Vector2i(sx, maxi(shaft_top, ground) + 1))
+	var shaft_deep := L.light_at(Vector2i(sx, shaft_top + 25))
+	check(near_top > 0.6, "竖井口附近有天光（%.2f）" % near_top)
+	check(shaft_deep >= 0.0 and shaft_deep < 0.1, "竖井深处是暗的，不会有一整条亮线（%.2f）" % shaft_deep)
+	for y in shaft_saved:
+		w.set_tile(sx, y, shaft_saved[y])
 	# 天光高度随挖掘和建造更新
 	var col := pt.x + 3
 	var top := w.sky_y[col]
