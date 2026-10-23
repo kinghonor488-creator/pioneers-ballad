@@ -30,6 +30,7 @@ var sky: SkyBackdrop
 var cursor: TileCursor
 var canvas_mod: CanvasModulate
 var player_light: PointLight2D
+var combat: Combat
 var rng := RandomNumberGenerator.new()
 var ready_done := false
 var world_name := "未命名世界"
@@ -43,6 +44,7 @@ var buffs := {}                 ## 名字 -> {"effects": {}, "time": 剩余秒�
 var stats := {}                 ## 饰品 + 增益合计
 var life_fruits := 0
 var dead := false
+var kills := {}                 ## 敌人 id -> 击败数量
 
 var _mine_target := Vector2i(-99999, -99999)
 var _mine_progress := 0.0
@@ -50,6 +52,7 @@ var _use_cooldown := 0.0
 var _heal_cooldown := 0.0
 var _regen_delay := 0.0
 var _respawn_timer := 0.0
+var _mana_delay := 0.0
 
 
 func _ready() -> void:
@@ -130,6 +133,10 @@ func _ready() -> void:
 	camera.limit_bottom = world.height * TS
 	player.add_child(camera)
 
+	combat = Combat.new()
+	add_child(combat)
+	combat.setup(self)
+
 	player_light = WorldRenderer.make_light(3.0, Color(1.0, 0.95, 0.85), 0.6)
 	player_light.position = Vector2(Player.W, Player.H) * 0.5
 	player.add_child(player_light)
@@ -182,6 +189,7 @@ func _bind_keys(action: String, keys: Array) -> void:
 func _give_start_kit() -> void:
 	inventory.add_instance(ItemDB.make("flint_pickaxe", 1))
 	inventory.add_instance(ItemDB.make("flint_axe", 1))
+	inventory.add_instance(ItemDB.make("flint_dagger", 1))
 	inventory.add("torch", 15)
 	inventory.add("apple", 3)
 
@@ -201,6 +209,7 @@ func _physics_process(delta: float) -> void:
 		return
 	var dir := Input.get_axis("move_left", "move_right")
 	player.step(delta, dir, Input.is_action_just_pressed("jump"), Input.is_action_pressed("jump"))
+	combat.physics_tick(delta)
 
 
 func _process(delta: float) -> void:
@@ -264,6 +273,13 @@ func _regen(delta: float) -> void:
 	_regen_delay = maxf(0.0, _regen_delay - delta)
 	if _regen_delay <= 0.0 and player.hp < player.max_hp:
 		player.hp = minf(player.max_hp, player.hp + 2.0 * delta)
+	_mana_delay = maxf(0.0, _mana_delay - delta)
+	if _mana_delay <= 0.0:
+		player.mana = minf(player.max_mana, player.mana + 12.0 * delta)
+
+
+func mana_used() -> void:
+	_mana_delay = 1.2
 
 
 # ---------------------------------------------------------------- 增益与属性
@@ -277,7 +293,8 @@ func _tick_buffs(delta: float) -> void:
 
 
 func recalc_stats() -> void:
-	var s := {"move": 0.0, "jump": 0.0, "mine": 0.0, "reach": 0.0, "light": 0.0, "nofall": false, "maxhp": 0.0}
+	var s := {"move": 0.0, "jump": 0.0, "mine": 0.0, "reach": 0.0, "light": 0.0, "nofall": false, "maxhp": 0.0,
+		"defense": 0.0, "damage": 0.0, "crit": 0.0, "mana": 0.0, "speed": 0.0}
 	for a in inventory.accessories:
 		if a != null:
 			_merge_effects(s, ItemDB.get_def(a.id).get("effects", {}))
@@ -289,6 +306,8 @@ func recalc_stats() -> void:
 	player.no_fall = bool(s.nofall)
 	player.max_hp = 100 + int(s.maxhp) + life_fruits * 20
 	player.hp = minf(player.hp, player.max_hp)
+	player.max_mana = 40 + int(s.mana)
+	player.mana = minf(player.mana, player.max_mana)
 
 
 func _merge_effects(s: Dictionary, eff: Dictionary) -> void:
@@ -336,6 +355,8 @@ func _handle_use(delta: float) -> void:
 	elif cat == "consumable":
 		if Input.is_action_just_pressed("use"):
 			use_consumable(inventory.selected)
+	elif cat == "weapon":
+		combat.use_weapon(item, get_global_mouse_position())
 	elif cat == "throwable":
 		if _use_cooldown <= 0.0:
 			throw_item(inventory.selected, get_global_mouse_position())
@@ -473,7 +494,17 @@ func _add_tool_xp(item: Dictionary, amount: int) -> void:
 	item.xp = int(item.get("xp", 0)) + amount
 	var after := ItemDB.mastery_level(item)
 	if after > before:
-		hud.notify("%s 的熟练度提升到 Lv%d！挖掘力 +%d%%" % [ItemDB.display_name(item), after, roundi(after * ItemDB.MASTERY_BONUS * 100)], ItemDB.RARITY_COLORS[4])
+		var what := "伤害" if ItemDB.is_weapon(item) else "挖掘力"
+		hud.notify("%s 的熟练度提升到 Lv%d！%s +%d%%" % [ItemDB.display_name(item), after, what, roundi(after * ItemDB.MASTERY_BONUS * 100)], ItemDB.RARITY_COLORS[4])
+
+
+func add_weapon_xp(item: Variant, amount: int) -> void:
+	if ItemDB.is_weapon(item):
+		_add_tool_xp(item, amount)
+
+
+func on_enemy_killed(enemy_id: String) -> void:
+	kills[enemy_id] = int(kills.get(enemy_id, 0)) + 1
 
 
 # ---------------------------------------------------------------- 放置、使用、投掷
@@ -588,9 +619,18 @@ func give(inst: Dictionary) -> void:
 
 # ---------------------------------------------------------------- 生命
 
-func damage(amount: int, reason: String) -> void:
+## from：伤害来源的位置。有来源的伤害（怪物、弹幕）会被防御减免、触发无敌时间并击退玩家；
+## 摔伤、爆炸这类没有来源的伤害不受防御影响。
+func damage(amount: int, reason: String, from: Vector2 = Vector2.INF) -> void:
 	if dead or amount <= 0:
 		return
+	if from != Vector2.INF:
+		if player.invuln > 0.0:
+			return
+		amount = maxi(1, amount - int(float(stats.get("defense", 0.0)) * 0.5))
+		player.invuln = 0.6
+		var away := signf(player.center().x - from.x)
+		player.velocity = Vector2((away if away != 0.0 else 1.0) * 230.0, -200.0)
 	player.hp -= amount
 	player.hurt_flash = 0.25
 	_regen_delay = 6.0
@@ -600,6 +640,7 @@ func damage(amount: int, reason: String) -> void:
 		player.hp = 0
 		player.visible = false
 		_respawn_timer = 3.0
+		combat.clear()
 		hud.notify("你倒下了……3 秒后在出生点复活。", Color(1, 0.3, 0.3))
 
 
@@ -658,8 +699,8 @@ func craft(r: Dictionary) -> bool:
 ## 在铁砧旁重铸当前选中工具的词缀
 func reforge_selected() -> bool:
 	var item = inventory.selected_item()
-	if not ItemDB.is_tool_item(item):
-		hud.hint("先在快捷栏选中一把工具。")
+	if not ItemDB.has_affix_slot(item):
+		hud.hint("先在快捷栏选中一把工具或武器。")
 		return false
 	if not stations_nearby().has("anvil"):
 		hud.hint("需要站在铁砧旁边。")
@@ -670,7 +711,7 @@ func reforge_selected() -> bool:
 			return false
 	for id in ItemDB.REFORGE_COST:
 		inventory.remove(id, int(ItemDB.REFORGE_COST[id]))
-	item.affix = ItemDB.roll_affix(rng)
+	item.affix = ItemDB.roll_affix(rng, ItemDB.affix_table(item))
 	hud.notify("重铸完成：%s" % ItemDB.display_name(item), ItemDB.rarity_color(item))
 	return true
 
@@ -703,6 +744,7 @@ func make_save_header() -> Dictionary:
 			"hp": player.hp,
 			"dead": dead,
 			"life_fruits": life_fruits,
+			"kills": kills.duplicate(),
 			"buffs": buffs.duplicate(true),
 			"slots": inventory.slots.duplicate(true),
 			"accessories": inventory.accessories.duplicate(true),
@@ -732,6 +774,8 @@ func _apply_save(h: Dictionary) -> void:
 	time_of_day = float(h.get("time_of_day", 0.3))
 	var p: Dictionary = h.get("player", {})
 	life_fruits = clampi(int(p.get("life_fruits", 0)), 0, MAX_LIFE_FRUITS)
+	var saved_kills: Variant = p.get("kills", {})
+	kills = saved_kills.duplicate() if typeof(saved_kills) == TYPE_DICTIONARY else {}
 	buffs = {}
 	var saved_buffs: Dictionary = p.get("buffs", {})
 	for k in saved_buffs:

@@ -5,6 +5,7 @@ extends RefCounted
 ##   · 工具词缀：制作或从宝匣里得到的工具会随机带一个词缀（迅捷的、幸运的、星选的……），
 ##     在铁砧旁可以花灵晶碎片"重铸"词缀
 ##   · 工具熟练度：工具挖得越多等级越高（最高 Lv5），每级挖掘力 +6%
+##   · 武器：近战剑、弓（消耗箭矢）、法杖（消耗法力），同样有词缀、熟练度和重铸
 ##   · 饰品栏（3 格）+ 药水增益：移动、跳跃、挖掘、照明、触及距离、免疫摔伤等效果可以叠加
 ##   · 遗迹宝匣：散落在地下，越深掉落越好
 ## 想加新道具：在 _build_items() 里加一行 _add(...)；想加配方：在 _build_recipes() 里加一行 _r(...)。
@@ -24,12 +25,15 @@ const RARITY_COLORS := [
 const CATEGORY_NAMES := {
 	"block": "方块", "material": "材料", "tool": "工具", "consumable": "消耗品",
 	"accessory": "饰品", "furniture": "家具", "throwable": "投掷物",
+	"weapon": "武器", "ammo": "弹药",
 }
+const WEAPON_TYPE_NAMES := {"melee": "近战", "bow": "远程", "staff": "魔法"}
 const STATION_NAMES := {"": "徒手", "workbench": "工作台", "furnace": "熔炉", "anvil": "铁砧"}
 const EFFECT_NAMES := {
 	"move": "移动速度", "jump": "跳跃力", "mine": "挖掘速度", "reach": "触及距离",
 	"light": "照明", "nofall": "免疫摔落伤害", "maxhp": "最大生命", "luck": "双倍掉落几率",
-	"power": "挖掘力",
+	"power": "挖掘力", "defense": "防御", "damage": "伤害", "crit": "暴击率",
+	"mana": "法力上限", "speed": "攻击速度", "knockback": "击退",
 }
 
 ## 熟练度：达到这些经验值就升级（Lv0 ~ Lv5）
@@ -52,6 +56,19 @@ const TOOL_AFFIXES := {
 	"钝口": {"weight": 5, "rarity": -1, "power": -0.2},
 }
 const NO_AFFIX_WEIGHT := 30
+
+## 武器词缀
+const WEAPON_AFFIXES := {
+	"锋利": {"weight": 12, "rarity": 1, "damage": 0.15},
+	"迅疾": {"weight": 10, "rarity": 1, "speed": 0.15},
+	"致命": {"weight": 8, "rarity": 1, "crit": 0.1},
+	"沉重": {"weight": 8, "rarity": 1, "knockback": 0.5, "damage": 0.05},
+	"狂暴": {"weight": 4, "rarity": 2, "damage": 0.2, "speed": 0.1},
+	"传奇": {"weight": 1, "rarity": 3, "damage": 0.2, "speed": 0.1, "crit": 0.05, "knockback": 0.2},
+	"钝": {"weight": 7, "rarity": -1, "damage": -0.15},
+	"迟缓": {"weight": 6, "rarity": -1, "speed": -0.15},
+}
+const BASE_CRIT := 0.04
 
 static var _items: Dictionary = {}
 static var _recipes: Array = []
@@ -96,17 +113,31 @@ static func can_stack(a: Dictionary, b: Dictionary) -> bool:
 static func make(id: String, count: int = 1, rng: RandomNumberGenerator = null) -> Dictionary:
 	var inst := {"id": id, "count": count}
 	var d := get_def(id)
-	if d.get("category", "") == "tool":
-		inst["affix"] = roll_affix(rng) if rng != null else ""
+	var cat := String(d.get("category", ""))
+	if cat == "tool" or cat == "weapon":
+		inst["affix"] = roll_affix(rng, WEAPON_AFFIXES if cat == "weapon" else TOOL_AFFIXES) if rng != null else ""
 		inst["xp"] = int(d.get("start_xp", 0))
 	return inst
 
 
-static func roll_affix(rng: RandomNumberGenerator) -> String:
+static func roll_affix(rng: RandomNumberGenerator, table: Dictionary = TOOL_AFFIXES) -> String:
 	var pool := [["", NO_AFFIX_WEIGHT]]
-	for affix_name in TOOL_AFFIXES:
-		pool.append([affix_name, TOOL_AFFIXES[affix_name]["weight"]])
+	for affix_name in table:
+		pool.append([affix_name, table[affix_name]["weight"]])
 	return String(weighted_pick(pool, rng))
+
+
+## 工具和武器才有词缀和熟练度，也才能重铸
+static func has_affix_slot(inst: Variant) -> bool:
+	return inst != null and category(inst.id) in ["tool", "weapon"]
+
+
+static func affix_table(inst: Variant) -> Dictionary:
+	return WEAPON_AFFIXES if inst != null and category(inst.id) == "weapon" else TOOL_AFFIXES
+
+
+static func affix_def(affix: String) -> Dictionary:
+	return TOOL_AFFIXES.get(affix, WEAPON_AFFIXES.get(affix, {}))
 
 
 static func weighted_pick(pool: Array, rng: RandomNumberGenerator) -> Variant:
@@ -124,7 +155,7 @@ static func weighted_pick(pool: Array, rng: RandomNumberGenerator) -> Variant:
 static func affix_value(inst: Variant, key: String) -> float:
 	if inst == null or String(inst.get("affix", "")) == "":
 		return 0.0
-	return float(TOOL_AFFIXES.get(inst.affix, {}).get(key, 0.0))
+	return float(affix_def(inst.affix).get(key, 0.0))
 
 
 static func mastery_level(inst: Variant) -> int:
@@ -152,7 +183,7 @@ static func rarity(inst: Variant) -> int:
 	var r := int(get_def(inst.id).get("rarity", 0))
 	var affix := String(inst.get("affix", ""))
 	if affix != "":
-		r += int(TOOL_AFFIXES.get(affix, {}).get("rarity", 0))
+		r += int(affix_def(affix).get("rarity", 0))
 	return clampi(r, 0, RARITY_NAMES.size() - 1)
 
 
@@ -198,6 +229,35 @@ static func tool_reach(inst: Variant) -> float:
 	return float(get_def(inst.id).get("reach", 0.0)) + affix_value(inst, "reach")
 
 
+# ---------------------------------------------------------------- 武器数值
+
+static func is_weapon(inst: Variant) -> bool:
+	return inst != null and category(inst.id) == "weapon"
+
+
+static func weapon_def(inst: Variant) -> Dictionary:
+	return get_def(inst.id).get("weapon", {}) if inst != null else {}
+
+
+## 不含饰品/增益加成的伤害；extra 是弹药附加伤害
+static func weapon_damage(inst: Variant, extra: float = 0.0) -> float:
+	var w := weapon_def(inst)
+	return (float(w.get("damage", 1)) + extra) * (1.0 + affix_value(inst, "damage") + mastery_level(inst) * MASTERY_BONUS)
+
+
+## 每秒攻击次数
+static func weapon_speed(inst: Variant) -> float:
+	return float(weapon_def(inst).get("speed", 2.0)) * maxf(0.2, 1.0 + affix_value(inst, "speed"))
+
+
+static func weapon_crit(inst: Variant) -> float:
+	return BASE_CRIT + float(weapon_def(inst).get("crit", 0.0)) + affix_value(inst, "crit")
+
+
+static func weapon_knockback(inst: Variant) -> float:
+	return float(weapon_def(inst).get("knockback", 3.0)) * (1.0 + affix_value(inst, "knockback"))
+
+
 # ---------------------------------------------------------------- 文字说明
 
 static func effects_lines(effects: Dictionary) -> Array:
@@ -213,6 +273,10 @@ static func effects_lines(effects: Dictionary) -> Array:
 				out.append("触及距离 +%d 格" % int(v))
 			"maxhp":
 				out.append("最大生命 +%d" % int(v))
+			"defense":
+				out.append("防御 +%d" % int(v))
+			"mana":
+				out.append("法力上限 +%d" % int(v))
 			_:
 				out.append("%s +%d%%" % [EFFECT_NAMES.get(k, k), roundi(float(v) * 100.0)])
 	return out
@@ -239,20 +303,33 @@ static func tooltip(inst: Variant) -> Array:
 			lines.append(["斧力 %.2f" % (float(d.axe) * mult), Color.WHITE])
 		if float(d.get("reach", 0.0)) > 0.0:
 			lines.append(["触及距离 +%d 格" % int(d.reach), blue])
+	if cat == "weapon":
+		var w: Dictionary = d.weapon
+		lines.append(["%d 点%s伤害" % [roundi(weapon_damage(inst)), WEAPON_TYPE_NAMES.get(w.type, "")], Color.WHITE])
+		lines.append(["攻击速度 %.1f 次/秒    暴击率 %d%%" % [weapon_speed(inst), roundi(weapon_crit(inst) * 100)], Color.WHITE])
+		lines.append(["击退 %.1f" % weapon_knockback(inst), grey])
+		if w.type == "bow":
+			lines.append(["需要箭矢（放在背包里即可）", blue])
+		elif w.type == "staff":
+			lines.append(["每次消耗 %d 点法力" % int(w.mana), blue])
+	if has_affix_slot(inst):
 		var affix := String(inst.get("affix", ""))
 		if affix != "":
-			var a: Dictionary = TOOL_AFFIXES[affix]
-			for k in ["power", "reach", "luck"]:
+			var a := affix_def(affix)
+			for k in ["power", "reach", "luck", "damage", "speed", "crit", "knockback"]:
 				if a.has(k):
 					var v := float(a[k])
 					var txt := ("%s %+d 格" % [EFFECT_NAMES[k], int(v)]) if k == "reach" else ("%s %+d%%" % [EFFECT_NAMES[k], roundi(v * 100.0)])
 					lines.append(["【%s】%s" % [affix, txt], good if v > 0 else bad])
 		var lvl := mastery_level(inst)
 		var xp := int(inst.get("xp", 0))
+		var what := "伤害" if cat == "weapon" else "挖掘力"
 		if lvl >= MASTERY_XP.size() - 1:
-			lines.append(["熟练度 Lv%d（已满，挖掘力 +%d%%）" % [lvl, roundi(lvl * MASTERY_BONUS * 100)], RARITY_COLORS[4]])
+			lines.append(["熟练度 Lv%d（已满，%s +%d%%）" % [lvl, what, roundi(lvl * MASTERY_BONUS * 100)], RARITY_COLORS[4]])
 		else:
-			lines.append(["熟练度 Lv%d  (%d/%d)  挖掘力 +%d%%" % [lvl, xp, MASTERY_XP[lvl + 1], roundi(lvl * MASTERY_BONUS * 100)], RARITY_COLORS[4]])
+			lines.append(["熟练度 Lv%d  (%d/%d)  %s +%d%%" % [lvl, xp, MASTERY_XP[lvl + 1], what, roundi(lvl * MASTERY_BONUS * 100)], RARITY_COLORS[4]])
+	if d.has("ammo"):
+		lines.append(["弓用的箭矢，伤害 +%d%s" % [int(d.ammo.damage), ("，可穿透 %d 个敌人" % int(d.ammo.pierce)) if int(d.ammo.get("pierce", 1)) > 1 else ""], Color.WHITE])
 	if d.has("effects"):
 		for t in effects_lines(d.effects):
 			lines.append([t, blue])
@@ -288,6 +365,8 @@ static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float) -> Array
 			["feather_charm", 10], ["gale_boots", 10], ["spring_shoes", 10],
 			["glowstone_necklace", 9], ["miner_gloves", 7], ["reach_bracer", 6],
 			["vital_amulet", 8], ["ancient_pickaxe", 4], ["wanderer_core", 1.0 + depth01 * 3.0],
+			["gale_dagger", 4], ["berserker_emblem", 5], ["hunter_goggles", 5], ["spring_pendant", 5],
+			["starstone_bow", 1.0 + depth01 * 2.0],
 		]
 		out.append(make(String(weighted_pick(pool, rng)), 1, rng))
 	else:
@@ -298,6 +377,7 @@ static func roll_chest_loot(rng: RandomNumberGenerator, depth01: float) -> Array
 		[["crystal_shard", 2, 6], 6], [["return_scroll", 1, 2], 4], [["copper_bar", 3, 8], 7.0 * (1.0 - depth01)],
 		[["iron_bar", 3, 8], 6], [["moonsilver_bar", 2, 6], 6.0 * depth01], [["life_fruit", 1, 1], 1.0 + 2.0 * depth01],
 		[["glow_potion", 1, 2], 4], [["miner_potion", 1, 2], 4], [["big_bomb", 1, 2], 2.0 * depth01],
+		[["arrow", 20, 50], 6], [["flame_arrow", 10, 30], 3.0 * depth01],
 	]
 	for i in rng.randi_range(2, 4):
 		var e: Array = weighted_pick(extras, rng)
@@ -319,6 +399,7 @@ static func _r(result: String, count: int, station: String, ingredients: Diction
 
 
 static func _build_items() -> void:
+	_build_weapons()
 	var wood := Color(0.55, 0.36, 0.2)
 	# —— 方块 ——
 	_add("dirt", "泥土", "block", 0, {"place": TileDB.DIRT, "desc": "松软的泥土。"})
@@ -382,10 +463,68 @@ static func _build_items() -> void:
 	_add("miner_gloves", "矿工手套", "accessory", 1, {"icon": "glove", "color": Color(0.75, 0.55, 0.3), "effects": {"mine": 0.2}})
 	_add("reach_bracer", "延伸臂环", "accessory", 2, {"icon": "bracer", "color": Color(0.75, 0.85, 1.0), "effects": {"reach": 2}})
 	_add("vital_amulet", "活力护符", "accessory", 2, {"icon": "amulet", "color": Color(1.0, 0.35, 0.4), "effects": {"maxhp": 25}})
+	_add("chitin_charm", "甲壳护符", "accessory", 1, {"icon": "chitin", "color": Color(0.5, 0.55, 0.62), "effects": {"defense": 4}})
+	_add("berserker_emblem", "狂战徽记", "accessory", 2, {"icon": "emblem", "color": Color(0.9, 0.3, 0.25), "effects": {"damage": 0.12}})
+	_add("hunter_goggles", "猎手护目镜", "accessory", 2, {"icon": "goggles", "color": Color(0.45, 0.8, 0.5), "effects": {"crit": 0.08}})
+	_add("spring_pendant", "灵泉坠饰", "accessory", 2, {"icon": "amulet", "color": Color(0.45, 0.6, 1.0), "effects": {"mana": 20}})
+	_add("batwing_cloak", "蝠翼披风", "accessory", 2, {"icon": "wing", "color": Color(0.45, 0.32, 0.5), "effects": {"jump": 0.2, "move": 0.08}})
 	_add("wanderer_core", "旅者星核", "accessory", 4, {"icon": "core", "color": Color(1.0, 0.85, 0.4), "effects": {"move": 0.12, "jump": 0.12, "mine": 0.15, "reach": 1, "light": 3.0}, "desc": "一颗温暖的小星星，似乎在为你指路。"})
 
 
+static func _add_weapon(id: String, display: String, rarity_value: int, icon_shape: String, color: Color, weapon: Dictionary, desc: String = "") -> void:
+	_add(id, display, "weapon", rarity_value, {"icon": icon_shape, "color": color, "weapon": weapon, "desc": desc})
+
+
+static func _build_weapons() -> void:
+	# 近战：range = 挥砍范围（像素）
+	_add_weapon("flint_dagger", "燧石短剑", 0, "dagger", Color(0.55, 0.55, 0.6), {"type": "melee", "damage": 7, "speed": 2.6, "knockback": 2.0, "range": 22}, "削尖的燧石，聊胜于无。")
+	_add_weapon("wooden_sword", "木剑", 0, "sword", Color(0.72, 0.52, 0.3), {"type": "melee", "damage": 8, "speed": 2.2, "knockback": 3.5, "range": 26})
+	_add_weapon("copper_sword", "赤铜剑", 0, "sword", Color(0.9, 0.5, 0.28), {"type": "melee", "damage": 11, "speed": 2.2, "knockback": 4.0, "range": 28})
+	_add_weapon("iron_sword", "铁剑", 1, "sword", Color(0.78, 0.78, 0.84), {"type": "melee", "damage": 15, "speed": 2.2, "knockback": 4.5, "range": 30})
+	_add_weapon("moonsilver_sword", "月银剑", 2, "sword", Color(0.75, 0.92, 1.0), {"type": "melee", "damage": 21, "speed": 2.4, "knockback": 4.5, "range": 32})
+	_add_weapon("starstone_sword", "星辉剑", 3, "sword", Color(0.68, 0.5, 1.0), {"type": "melee", "damage": 29, "speed": 2.5, "knockback": 5.0, "range": 34})
+	_add_weapon("ember_greatsword", "熔晶大剑", 4, "greatsword", Color(1.0, 0.5, 0.18), {"type": "melee", "damage": 42, "speed": 1.8, "knockback": 7.0, "range": 42}, "沉重、灼热，一剑劈开深渊。")
+	_add_weapon("gale_dagger", "风之短刃", 3, "dagger", Color(0.5, 1.0, 0.8), {"type": "melee", "damage": 14, "speed": 4.2, "knockback": 1.5, "range": 22, "crit": 0.06}, "快得像一阵风。只能在遗迹宝匣里找到。")
+	# 弓：伤害 = 弓 + 箭
+	_add_weapon("wooden_bow", "木弓", 0, "bow", Color(0.6, 0.4, 0.22), {"type": "bow", "damage": 6, "speed": 1.6, "knockback": 1.5, "shot_speed": 420.0})
+	_add_weapon("iron_bow", "铁弓", 1, "bow", Color(0.78, 0.78, 0.84), {"type": "bow", "damage": 11, "speed": 1.9, "knockback": 2.0, "shot_speed": 480.0})
+	_add_weapon("starstone_bow", "星辉长弓", 3, "bow", Color(0.68, 0.5, 1.0), {"type": "bow", "damage": 20, "speed": 2.2, "knockback": 2.5, "shot_speed": 560.0}, "射出的箭拖着星光。")
+	# 法杖：消耗法力，弹道不受重力影响，可以穿透
+	_add_weapon("wisp_staff", "幽光法杖", 2, "staff", Color(0.6, 0.9, 1.0), {"type": "staff", "damage": 14, "speed": 2.5, "knockback": 2.0, "mana": 5, "shot_speed": 330.0, "pierce": 2})
+	_add_weapon("ember_staff", "炎爆法杖", 3, "staff", Color(1.0, 0.5, 0.2), {"type": "staff", "damage": 30, "speed": 1.5, "knockback": 5.0, "mana": 12, "shot_speed": 300.0, "pierce": 3})
+	# 弹药
+	_add("arrow", "箭矢", "ammo", 0, {"icon": "arrow", "color": Color(0.8, 0.8, 0.85), "ammo": {"type": "arrow", "damage": 2}})
+	_add("flame_arrow", "火焰箭", "ammo", 1, {"icon": "arrow", "color": Color(1.0, 0.55, 0.2), "ammo": {"type": "arrow", "damage": 5}})
+	_add("crystal_arrow", "灵晶箭", "ammo", 2, {"icon": "arrow", "color": Color(0.5, 1.0, 0.92), "ammo": {"type": "arrow", "damage": 7, "pierce": 3}})
+	# 怪物掉落的材料
+	_add("mud_core", "泥核", "material", 0, {"icon": "blob", "color": Color(0.55, 0.4, 0.25), "desc": "泥团怪身体里黏糊糊的核心。"})
+	_add("bat_wing", "蝠翼膜", "material", 1, {"icon": "wing", "color": Color(0.45, 0.32, 0.5), "desc": "又薄又韧。"})
+	_add("chitin", "甲壳片", "material", 1, {"icon": "chitin", "color": Color(0.5, 0.55, 0.62), "desc": "岩甲虫坚硬的背壳。"})
+	_add("wisp_dust", "幽光尘", "material", 1, {"icon": "dust", "color": Color(0.6, 0.9, 1.0), "desc": "游魂消散后留下的微光。"})
+	_add("ember_core", "余烬核心", "material", 3, {"icon": "core", "color": Color(1.0, 0.45, 0.15), "desc": "余烬魔体内永不熄灭的火种。"})
+
+
 static func _build_recipes() -> void:
+	# 武器和弹药
+	_r("wooden_sword", 1, "", {"wood": 7})
+	_r("wooden_bow", 1, "workbench", {"wood": 10})
+	_r("arrow", 25, "workbench", {"wood": 1, "stone": 1})
+	_r("flame_arrow", 25, "workbench", {"arrow": 25, "sulfur": 1})
+	_r("crystal_arrow", 25, "anvil", {"arrow": 25, "crystal_shard": 1})
+	_r("copper_sword", 1, "workbench", {"copper_bar": 7})
+	_r("iron_sword", 1, "anvil", {"iron_bar": 9})
+	_r("iron_bow", 1, "anvil", {"iron_bar": 8, "bat_wing": 2})
+	_r("moonsilver_sword", 1, "anvil", {"moonsilver_bar": 11})
+	_r("starstone_sword", 1, "anvil", {"starstone_bar": 11, "crystal_shard": 3})
+	_r("ember_greatsword", 1, "anvil", {"ember_bar": 14, "ember_core": 3})
+	_r("wisp_staff", 1, "workbench", {"wisp_dust": 8, "crystal_shard": 4, "wood": 3})
+	_r("ember_staff", 1, "anvil", {"ember_core": 4, "ember_bar": 8, "wisp_dust": 5})
+	# 怪物材料做的饰品和道具
+	_r("spring_shoes", 1, "workbench", {"mud_core": 12, "iron_bar": 2})
+	_r("chitin_charm", 1, "anvil", {"chitin": 8, "iron_bar": 2})
+	_r("batwing_cloak", 1, "anvil", {"bat_wing": 8, "moonsilver_bar": 3})
+	_r("glow_potion", 2, "workbench", {"wisp_dust": 2, "glass_bottle": 2})
+	_r("heal_potion", 2, "workbench", {"mud_core": 3, "mushroom": 1, "glass_bottle": 2})
 	# 徒手
 	_r("workbench", 1, "", {"wood": 10})
 	_r("torch", 3, "", {"wood": 1})

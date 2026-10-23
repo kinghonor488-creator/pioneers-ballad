@@ -18,6 +18,10 @@ func check(cond: bool, what: String) -> void:
 
 
 func _initialize() -> void:
+	# 看门狗：脚本出错导致协程中断时，不会一直卡住
+	create_timer(240.0).timeout.connect(func():
+		printerr("✘ 测试超时（可能有脚本错误中断了测试）")
+		quit(2))
 	_run()
 
 
@@ -87,6 +91,25 @@ func _test_data() -> void:
 	var p0 := ItemDB.mining_power(pick, "earth")
 	pick.xp = ItemDB.MASTERY_XP[3]
 	check(ItemDB.mastery_level(pick) == 3 and ItemDB.mining_power(pick, "earth") > p0, "熟练度升级后挖得更快")
+	bad = []
+	for eid in EnemyDB.DEFS:
+		for d in EnemyDB.get_def(eid).drops:
+			if not ItemDB.exists(d[0]):
+				bad.append(d[0])
+	check(bad.is_empty(), "敌人掉落物都存在 %s" % [bad])
+	var sw := ItemDB.make("iron_sword")
+	var base_dmg := ItemDB.weapon_damage(sw)
+	sw.affix = "锋利"
+	check(ItemDB.weapon_damage(sw) > base_dmg and ItemDB.rarity(sw) == 2, "武器词缀提高伤害和稀有度")
+	var wsw := 0
+	for i in 100:
+		var a := String(ItemDB.make("iron_sword", 1, rng).affix)
+		if a != "" and ItemDB.WEAPON_AFFIXES.has(a):
+			wsw += 1
+	check(wsw > 30, "武器会随机到武器词缀（100 把里 %d 把）" % wsw)
+	var night_c := EnemyDB.candidates("地表", true).map(func(e): return e[0])
+	var day_c := EnemyDB.candidates("地表", false).map(func(e): return e[0])
+	check("wisp" in night_c and not "wisp" in day_c and "mudling" in day_c, "游魂只在夜晚出现")
 
 
 func _test_worldgen() -> void:
@@ -227,12 +250,121 @@ func _test_game() -> void:
 	main.explode(bc, 2.0)
 	check(main.world.get_tile(bt.x, bt.y) == TileDB.AIR, "炸弹能炸掉方块")
 
+	await _test_combat(main)
+
 	# 跑几帧游戏主循环，确认不报错
 	for i in 30:
 		await process_frame
 	check(main.ready_done, "游戏主循环运行正常")
 
 	await _test_save_load(main)
+
+
+func _test_combat(main: Node2D) -> void:
+	print("== 战斗 ==")
+	var cb: Combat = main.combat
+	var p: Player = main.player
+	var inv: Inventory = main.inventory
+	cb.spawning_enabled = false
+	cb.clear()
+	var sword := ItemDB.make("iron_sword")
+	var e := cb.spawn("mudling", p.position + Vector2(40, p.body_size.y - 10))
+	var hp0 := e.hp
+	var dealt := cb.deal_damage(e, sword, 0.0, Vector2.RIGHT)
+	check(dealt > 0 and is_equal_approx(e.hp, hp0 - dealt), "武器能对敌人造成伤害（%d）" % dealt)
+	check(int(sword.xp) == 1, "命中会增加武器熟练度")
+	var cores := inv.count_of("mud_core")
+	for i in 20:
+		if not is_instance_valid(e) or e.hp <= 0.0:
+			break
+		cb.deal_damage(e, sword, 0.0, Vector2.RIGHT)
+	check(e.hp <= 0.0, "能打死敌人")
+	check(inv.count_of("mud_core") > cores, "击败泥团怪掉落泥核")
+	check(int(main.kills.get("mudling", 0)) == 1, "击杀计数 +1")
+
+	# 防御和无敌时间
+	inv.accessories[1] = ItemDB.make("chitin_charm")
+	main.recalc_stats()
+	p.invuln = 0.0
+	p.hp = 100.0
+	main.damage(20, "测试", p.center() + Vector2(10, 0))
+	check(is_equal_approx(p.hp, 82.0), "防御 4 减少 2 点伤害（剩 %.0f）" % p.hp)
+	main.damage(20, "测试", p.center() + Vector2(10, 0))
+	check(is_equal_approx(p.hp, 82.0), "受伤后有短暂无敌时间")
+	p.invuln = 0.0
+	p.velocity = Vector2.ZERO
+
+	# 挥剑
+	var beetle := cb.spawn("rock_beetle", p.position + Vector2(14, 2))
+	cb._cooldown = 0.0
+	check(cb.use_weapon(sword, p.center() + Vector2(100, 0)), "能挥剑")
+	check(not cb.use_weapon(sword, p.center() + Vector2(100, 0)), "攻击有冷却时间")
+	cb._update_swing(0.02)
+	check(beetle.hp < beetle.max_hp, "挥剑砍中身前的岩甲虫")
+	p.invuln = 5.0
+
+	# 弓和箭
+	var bow := ItemDB.make("wooden_bow")
+	for i in inv.slots.size():
+		if inv.slots[i] != null and ItemDB.category(inv.slots[i].id) == "ammo":
+			inv.slots[i] = null
+	cb._cooldown = 0.0
+	check(not cb.use_weapon(bow, p.center() + Vector2(100, 0)), "没有箭矢时弓射不出去")
+	inv.add("arrow", 10)
+	var shots := cb.projectiles.size()
+	check(cb.use_weapon(bow, p.center() + Vector2(100, -20)) and inv.count_of("arrow") == 9, "射箭消耗 1 支箭")
+	check(cb.projectiles.size() == shots + 1, "射出了箭矢")
+
+	# 法杖
+	var staff := ItemDB.make("wisp_staff")
+	p.mana = 40.0
+	cb._cooldown = 0.0
+	check(cb.use_weapon(staff, p.center() + Vector2(100, 0)) and is_equal_approx(p.mana, 35.0), "法杖消耗法力")
+	p.mana = 2.0
+	cb._cooldown = 0.0
+	check(not cb.use_weapon(staff, p.center() + Vector2(100, 0)), "法力不足时不能施法")
+
+	# 弹幕：箭命中敌人、火球命中玩家
+	cb.clear()
+	var target := cb.spawn("mudling", p.center() + Vector2(60, -20))
+	var arrow_hp := target.hp
+	cb._cooldown = 0.0
+	cb.use_weapon(bow, target.center())
+	for i in 30:
+		cb.physics_tick(1.0 / 60.0)
+		if not is_instance_valid(target) or target.hp < arrow_hp:
+			break
+	check(not is_instance_valid(target) or target.hp < arrow_hp, "箭矢命中敌人")
+	cb.clear()
+	p.invuln = 0.0
+	var hp_before := p.hp
+	cb.spawn_hostile_shot(p.center() + Vector2(-40, 0), Vector2(300, 0), 10)
+	for i in 20:
+		cb.physics_tick(1.0 / 60.0)
+	check(p.hp < hp_before, "敌人的火球会伤到玩家")
+
+	# 刷怪
+	cb.clear()
+	var spawned := 0
+	for i in 10:
+		if cb.try_spawn() != null:
+			spawned += 1
+	check(spawned > 0, "能在玩家附近刷出敌人（%d 只）" % spawned)
+	var far_ok := true
+	for en in cb.enemies:
+		if en.center().distance_to(p.center()) < Combat.SPAWN_MIN_DIST * 16.0 - 40.0:
+			far_ok = false
+	check(far_ok, "敌人刷在屏幕外")
+	for i in 120:
+		cb.physics_tick(1.0 / 60.0)
+	check(true, "敌人 AI 运行 2 秒没有报错")
+	cb.clear()
+	check(cb.enemies.is_empty(), "清除所有敌人")
+	inv.accessories[1] = null
+	main.recalc_stats()
+	p.invuln = 0.0
+	p.hp = p.max_hp
+	cb.spawning_enabled = true
 
 
 func _test_save_load(main: Node2D) -> void:

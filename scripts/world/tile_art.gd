@@ -382,5 +382,76 @@ static func paint_icon(img: Image, shape: String, c: Color) -> void:
 				_line(img, o, Vector2i(8, 8), Vector2i(8, 8) + dir * 4, c.darkened(0.15))
 			_disc(img, o, Vector2(8.5, 8.5), 3.3, c.lightened(0.3))
 			_px(img, o, 7, 7, Color.WHITE)
+		"sword", "dagger", "greatsword":
+			# 剑身从左下斜向右上，柄在左下角
+			var tip := 13 if shape != "dagger" else 10
+			var w2 := 1 if shape != "greatsword" else 2
+			for i in range(5, tip + 1):
+				for t in w2 + 1:
+					_px(img, o, i + t - 1, 15 - i - 1 + t, c if t == 0 else c.darkened(0.25))
+				_px(img, o, i, 15 - i, c.lightened(0.35))
+			_px(img, o, tip + 1, 14 - tip, c.lightened(0.5))
+			_line(img, o, Vector2i(2, 8), Vector2i(7, 13), Color(0.85, 0.7, 0.3))   # 护手
+			_line(img, o, Vector2i(1, 14), Vector2i(4, 11), WOOD.darkened(0.2))       # 剑柄
+			_px(img, o, 1, 14, Color(0.85, 0.7, 0.3))
+		"bow":
+			for i in range(0, 13):
+				var t := i / 12.0
+				var p := Vector2(2, 13).lerp(Vector2(13, 2), t) + Vector2(1, 1) * sin(t * PI) * 3.5
+				_px(img, o, roundi(p.x), roundi(p.y), c)
+				_px(img, o, roundi(p.x) + 1, roundi(p.y), c.darkened(0.3))
+			_line(img, o, Vector2i(2, 13), Vector2i(13, 2), Color(0.92, 0.92, 0.85, 0.9))
+		"staff":
+			_line(img, o, Vector2i(2, 14), Vector2i(10, 6), WOOD)
+			_line(img, o, Vector2i(3, 14), Vector2i(11, 6), WOOD.darkened(0.3))
+			_disc(img, o, Vector2(12, 4), 3.0, c)
+			_px(img, o, 11, 3, Color.WHITE)
+			_px(img, o, 9, 4, c.darkened(0.3))
+			_px(img, o, 13, 7, c.darkened(0.3))
+		"arrow":
+			_line(img, o, Vector2i(3, 12), Vector2i(11, 4), Color(0.62, 0.44, 0.26))
+			_rect(img, o, 11, 2, 13, 4, c)
+			_px(img, o, 12, 5, c.darkened(0.3))
+			_px(img, o, 10, 3, c.darkened(0.3))
+			_line(img, o, Vector2i(1, 12), Vector2i(3, 14), Color(0.95, 0.95, 0.95))
+			_line(img, o, Vector2i(2, 11), Vector2i(4, 13), Color(0.85, 0.85, 0.85))
+		"blob":
+			_disc(img, o, Vector2(8, 9.5), 5.0, c)
+			_rect(img, o, 3, 12, 12, 14, c)
+			_px(img, o, 5, 7, c.lightened(0.45))
+			_px(img, o, 6, 6, c.lightened(0.3))
+		"wing":
+			for y in range(3, 14):
+				for x in range(2, 14):
+					if x + y > 10 and x - y < 6 and (y < 12 or x % 3 != 0):
+						_px(img, o, x, y, c if (x + y) % 4 != 0 else c.darkened(0.3))
+			_line(img, o, Vector2i(3, 13), Vector2i(13, 3), c.darkened(0.5))
+		"chitin":
+			for y in range(2, 15):
+				var half := 6 - absi(y - 7) / 2
+				for x in range(8 - half, 8 + half):
+					_px(img, o, x, y, c if x != 7 else c.darkened(0.35))
+			_line(img, o, Vector2i(4, 6), Vector2i(11, 6), c.lightened(0.3))
+			_line(img, o, Vector2i(4, 10), Vector2i(11, 10), c.darkened(0.2))
+		"dust":
+			for p in [Vector2i(4, 4), Vector2i(10, 3), Vector2i(7, 8), Vector2i(3, 11), Vector2i(12, 10), Vector2i(8, 13)]:
+				_px(img, o, p.x, p.y, Color.WHITE)
+				for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+					_px(img, o, p.x + d.x, p.y + d.y, c)
+		"emblem":
+			for y in range(2, 15):
+				var half := 6 if y < 9 else 6 - (y - 8)
+				for x in range(8 - half, 8 + half):
+					_px(img, o, x, y, c if x > 2 + 0 and y > 2 else c.lightened(0.3))
+			_line(img, o, Vector2i(5, 5), Vector2i(10, 10), Color(0.95, 0.85, 0.5))
+			_line(img, o, Vector2i(10, 5), Vector2i(5, 10), Color(0.95, 0.85, 0.5))
+		"goggles":
+			_rect(img, o, 1, 7, 14, 8, Color(0.3, 0.25, 0.2))
+			_disc(img, o, Vector2(5, 8), 3.0, Color(0.25, 0.25, 0.3))
+			_disc(img, o, Vector2(11, 8), 3.0, Color(0.25, 0.25, 0.3))
+			_disc(img, o, Vector2(5, 8), 2.0, c)
+			_disc(img, o, Vector2(11, 8), 2.0, c)
+			_px(img, o, 4, 7, Color.WHITE)
+			_px(img, o, 10, 7, Color.WHITE)
 		_:
 			_rect(img, o, 2, 2, 13, 13, Color.MAGENTA)

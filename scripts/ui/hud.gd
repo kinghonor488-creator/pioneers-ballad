@@ -338,7 +338,7 @@ func _draw_slot(r: Rect2, inst: Variant, selected: bool, dim: bool = false) -> v
 	if int(inst.count) > 1:
 		var s := str(inst.count)
 		_text(r.position + Vector2(r.size.x - 8.0 * s.length() - 4.0, r.size.y - 4.0), s, 13)
-	if ItemDB.is_tool_item(inst):
+	if ItemDB.has_affix_slot(inst):
 		var lvl := ItemDB.mastery_level(inst)
 		if lvl > 0:
 			_text(r.position + Vector2(3, 13), "★%d" % lvl, 11, ItemDB.RARITY_COLORS[4])
@@ -427,13 +427,13 @@ func _draw_inventory(inv: Inventory, m: Vector2) -> void:
 			_tip = _recipe_tip(rc, has_station)
 	var rr := reforge_rect()
 	var sel: Variant = inv.selected_item()
-	var can := _stations.has("anvil") and ItemDB.is_tool_item(sel)
+	var can := _stations.has("anvil") and ItemDB.has_affix_slot(sel)
 	draw_rect(rr, Color(0.3, 0.2, 0.45, 0.9) if can else Color(0.15, 0.15, 0.2, 0.8))
 	draw_rect(rr, Color(0.8, 0.6, 1, 0.8) if can else Color(0.4, 0.4, 0.5, 0.6), false, 1.0)
-	_text(rr.position + Vector2(10, 21), "重铸选中工具的词缀（2 灵晶碎片）", 13, Color.WHITE if can else Color(0.6, 0.6, 0.65))
+	_text(rr.position + Vector2(10, 21), "重铸选中工具/武器的词缀（2 灵晶碎片）", 13, Color.WHITE if can else Color(0.6, 0.6, 0.65))
 	if rr.has_point(m):
-		_tip = [["重铸", Color(0.8, 0.6, 1)], ["站在铁砧旁，花 2 个灵晶碎片给快捷栏选中的工具重新随机一个词缀。", Color(0.85, 0.85, 0.9)]]
-		if sel != null and ItemDB.is_tool_item(sel):
+		_tip = [["重铸", Color(0.8, 0.6, 1)], ["站在铁砧旁，花 2 个灵晶碎片给快捷栏选中的工具或武器重新随机一个词缀。", Color(0.85, 0.85, 0.9)]]
+		if sel != null and ItemDB.has_affix_slot(sel):
 			_tip.append(["当前：" + ItemDB.display_name(sel), ItemDB.rarity_color(sel)])
 	_text(rr.position + Vector2(270, 21), "左键拿起/放下 · 右键背包里的饰品可直接装备", 12, Color(0.7, 0.72, 0.8))
 
@@ -462,18 +462,26 @@ func _draw_status(vs: Vector2) -> void:
 	draw_rect(Rect2(r.position, Vector2(w * clampf(p.hp / p.max_hp, 0, 1), 18)), Color(0.85, 0.2, 0.25))
 	draw_rect(r, Color(1, 1, 1, 0.4), false, 1.0)
 	_text(r.position + Vector2(6, 14), "生命 %d / %d" % [ceili(p.hp), p.max_hp], 13)
+	var mr := Rect2(x, 38, w, 12)
+	draw_rect(mr, Color(0.05, 0.07, 0.18, 0.8))
+	draw_rect(Rect2(mr.position, Vector2(w * clampf(p.mana / p.max_mana, 0, 1), 12)), Color(0.3, 0.5, 1.0))
+	draw_rect(mr, Color(1, 1, 1, 0.35), false, 1.0)
+	_text(mr.position + Vector2(6, 10), "法力 %d / %d" % [floori(p.mana), p.max_mana], 10)
+	var defense := int(game.stats.get("defense", 0.0))
+	if defense > 0:
+		_text(Vector2(x - 70, 30), "防御 %d" % defense, 13, Color(0.8, 0.85, 1))
 	var hours: float = game.time_of_day * 24.0
 	var ty := int(p.center().y / 16.0)
 	var depth_m: int = (int(game.world.layers.surface) - ty) / 2
 	var depth_txt := ("海拔 %d 米" % depth_m) if depth_m >= 0 else ("深度 %d 米" % -depth_m)
-	_text(Vector2(x, 52), "第 %d 天  %02d:%02d" % [game.day, int(hours), int(fmod(hours, 1.0) * 60.0)], 14)
-	_text(Vector2(x, 72), "%s · %s" % [game.world.layer_name(ty), depth_txt], 14, Color(0.8, 0.85, 1))
-	var y := 96.0
+	_text(Vector2(x, 70), "第 %d 天  %02d:%02d" % [game.day, int(hours), int(fmod(hours, 1.0) * 60.0)], 14)
+	_text(Vector2(x, 90), "%s · %s" % [game.world.layer_name(ty), depth_txt], 14, Color(0.8, 0.85, 1))
+	var y := 114.0
 	for buff_name in game.buffs:
 		var b: Dictionary = game.buffs[buff_name]
 		_text(Vector2(x, y), "✧ %s  %d 秒" % [buff_name, ceili(b.time)], 13, Color(0.6, 0.9, 1))
 		y += 18.0
-	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
+	_text(Vector2(16, vs.y - 14), "A/D 移动 · 空格 跳 · 左键 挖/放/用/攻击 · 1-0/滚轮 选格 · E 背包与制作 · Esc 菜单/存档", 12, Color(1, 1, 1, 0.5))
 	_text(Vector2(vs.x - 90, vs.y - 14), "FPS %d" % Engine.get_frames_per_second(), 12, Color(1, 1, 1, 0.4))
 
 
