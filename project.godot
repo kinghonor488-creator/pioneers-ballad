@@ -1,0 +1,28 @@
+; Engine configuration file.
+; 星壤纪元 (Starsoil) —— 临时名，正式名字等你来起。
+
+config_version=5
+
+[application]
+
+config/name="星壤纪元 Starsoil"
+config/description="一个原创的 2D 沙盒冒险游戏（开发中）。"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=0
+environment/defaults/default_clear_color=Color(0.03, 0.03, 0.05, 1)
